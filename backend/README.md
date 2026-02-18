@@ -3,84 +3,68 @@
 Minimal Python backend for generating AI-powered insights from clinical trial datasets.
 
 This backend:
+* Loads a CSV or Excel dataset
+* Builds a structured preview (schema, head rows, missingness, numeric summary)
+* Sends the preview to an LLM provider
+* Returns structured clinical/data-quality insights
 
-- Loads a CSV or Excel dataset
-- Builds a structured preview (schema, head rows, missingness, numeric summary)
-- Sends the preview to an LLM provider
-- Returns actionable clinical and data-quality insights
+### Currently supported providers:
+* OpenAI (ChatGPT)
+* Google Gemini
+* Anthropic Claude
 
-Supported providers:
-
-- OpenAI (ChatGPT)
-- Google Gemini
-- Anthropic Claude
-
-This is the foundational execution layer of the Q-Trial system.
+> This is the foundational layer of the Q-Trial system.
 
 ---
 
 ## What It Does (Current Scope)
 
-Pipeline:
+### Pipeline
+1. **Dataset** (CSV/XLSX)
+2. **Pandas DataFrame**
+3. **Dataset Preview Builder**
+4. **LLM Provider** (OpenAI | Gemini | Claude)
+5. **Actionable Clinical + Data Insights**
 
-```text
-Dataset (CSV/XLSX)
-        ↓
-Pandas DataFrame
-        ↓
-Dataset Preview Builder
-        ↓
-LLM Provider (OpenAI | Gemini | Claude)
-        ↓
-Actionable Clinical + Data Insights
+**Important:**
+* The full dataset is **NOT** sent to the model.
+* Only a structured preview is transmitted to control context size and cost.
 
-Important:
+---
 
-    The full dataset is NOT sent to the model.
+## Requirements
+* Python 3.12+
+* Poetry
+* API key for at least one provider
 
-    Only a structured preview is transmitted to control context size and cost.
-
-Requirements
-
-    Python 3.12+
-
-    Poetry
-
-    An API key for at least one provider
-
-Install Poetry (Codespaces / Linux / macOS)
-
-curl -sSL https://install.python-poetry.org | python3 -
+### Install Poetry (Codespaces / Linux / Mac)
+```bash
+curl -sSL [https://install.python-poetry.org](https://install.python-poetry.org) | python3 -
 export PATH="$HOME/.local/bin:$PATH"
-
+```
 Verify:
 
+```bash
 poetry --version
-
-Setup
-
+```
+Setup Project
 From inside backend/:
 
+```bash
 poetry config virtualenvs.in-project true
 poetry install
+```
+This creates: backend/.venv/
 
-This creates:
+Note: If VS Code does not detect dependencies, select the interpreter manually at:
+backend/.venv/bin/python
 
-backend/.venv/
-
-VS Code / Pylance (Imports not resolved)
-
-If VS Code shows missing imports, select the interpreter:
-
-    backend/.venv/bin/python
-
-Then reload the window.
 Environment Variables
-
-Create a .env file inside backend/.
+Create a .env file inside backend/. Only set the provider(s) you intend to use.
 
 Example:
 
+```code
 OPENAI_API_KEY=your_openai_key
 OPENAI_MODEL=gpt-4o-mini
 
@@ -89,10 +73,9 @@ GEMINI_MODEL=gemini-2.5-flash
 
 ANTHROPIC_API_KEY=your_anthropic_key
 CLAUDE_MODEL=claude-opus-4-6
+```
 
-Only set the provider(s) you intend to use.
-Project Layout
-
+### Project Structure
 backend/
   data/
   src/qtrial_backend/
@@ -111,85 +94,86 @@ backend/
       types.py
       router.py
   pyproject.toml
-  README.md
 
-Where to Put Datasets
+### Architecture Breakdown:
+dataset/ → ingestion + preview generation
 
-Create a folder (recommended):
+providers/ → provider-specific implementations
 
-mkdir -p data
+core/ → routing + shared types
 
-Place files in:
+prompts/ → prompt definitions
 
-backend/data/
+main.py → CLI interface
 
-Supported formats:
+Running the CLI
+Place your dataset inside backend/data/ (e.g., backend/data/pbc.csv).
 
-    .csv
+Run the command for your preferred provider:
 
-    .xlsx / .xls
-
-Example:
-
-backend/data/pbc.csv
-
-Run the CLI
-
-From inside backend/:
-
+# OpenAI
+```python
 poetry run qtrial --file data/pbc.csv --provider openai
-
-Other providers:
-
+```
+# Gemini
+```python
 poetry run qtrial --file data/pbc.csv --provider gemini
+```
+# Claude
+```python
 poetry run qtrial --file data/pbc.csv --provider claude
+```
+Supported File Types: .csv, .xlsx
 
-You should see:
-
-Provider: <provider>
-Model: <model>
-<insights text>
-
+### Technical Details
 What the Model Receives
+The model receives a payload containing:
 
-The model receives a dataset preview payload containing:
+Dataset shape
 
-    Dataset shape
+Column schema
 
-    Column schema
+First N rows
 
-    First N rows (default: 25)
+Missingness percentages
 
-    Missingness percentages
+Numeric summary statistics
 
-    Numeric summary statistics
+This prevents oversized context, privacy leakage, and uncontrolled token costs.
 
-This reduces:
+### Current Limitations
 
-    Token cost
+No RAG grounding yet
 
-    Context overflow
+No evaluation/judge system yet
 
-    Leakage of full dataset contents
+No API server (CLI only)
 
-Current Limitations
+#### CLI vs API
+This backend is currently CLI-based. It is intentionally built this way for:
 
-    Output is free text (no structured JSON yet)
+Rapid experimentation
 
-    No RAG grounding yet
+Reproducibility
 
-    No evaluation/judge system yet
+Provider benchmarking
 
-    CLI-only (no API server yet)
+Research workflow
 
-CLI vs API Notes
+An API wrapper (FastAPI) can be added later without modifying core logic.
 
-This backend is intentionally CLI-first for:
+### Next Planned Improvements
+Structured JSON output mode
 
-    Fast iteration
+Save outputs to file
 
-    Reproducibility
+Provider comparison mode
 
-    Easy provider benchmarking
+RAG integration
 
-An API wrapper (e.g., FastAPI) can be added later without changing core logic.
+Evaluation suite
+
+FastAPI wrapper
+
+### Development Notes
+This focuses on a clean modular architecture, provider abstraction, and controlled prompt inputs for research extensibility.
