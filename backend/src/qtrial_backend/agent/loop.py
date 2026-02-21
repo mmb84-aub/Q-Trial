@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import json
+
+from rich.console import Console
+from rich.status import Status
+
+from qtrial_backend.agent.context import AgentContext
+from qtrial_backend.core.types import (
+    AgentResponse,
+    ChatResponse,
+    Message,
+    ToolResult,
+)
+from qtrial_backend.providers.base import LLMClient
+from qtrial_backend.tools.registry import RegisteredTool, ToolRegistry
+
+console = Console()
+
+
+class AgentLoop:
+    """While-loop orchestrator that drives the LLM ↔ tool conversation."""
+
+    def __init__(
+        self,
+        client: LLMClient,
+        tools: list[RegisteredTool],
+        system_prompt: str,
+        max_iterations: int = 25,
+        max_consecutive_errors: int = 3,
+        verbose: bool = False,
+    ) -> None:
+        self.client = client
+        self.tools = tools
+        self.system_prompt = system_prompt
+        self.max_iterations = max_iterations
+        self.max_consecutive_errors = max_consecutive_errors
+        self.verbose = verbose
+
+    def run(self, initial_message: str, context: AgentContext) -> AgentResponse:
+        messages: list[Message] = [
+            Message(role="user", content=initial_message),
+        ]
+
+        iterations = 0
+        total_tool_calls = 0
+        consecutive_errors = 0
+        tool_log: list[dict] = []
+
+        with Status(
+            "[bold green]Agent is analysing...", console=console
+        ) as status:
+            while iterations < self.max_iterations:
+                iterations += 1
+                status.update(
+                    f"[bold green]Iteration {iterations}/{self.max_iterations}..."
+                )
+
+                # ── LLM call ──────────────────────────────────────────
+                response: ChatResponse = self.client.chat(
+                    messages=messages,
+                    tools=self.tools,
+                    system=self.system_prompt,
+                )
+
+                # ── No tool calls → final answer ─────────────────────
+                if not response.has_tool_calls:
+                    return AgentResponse(
+                        provider=response.provider,
+                        model=response.model,
+                        text=response.content or "(No response text)",
+                        tool_calls_made=total_tool_calls,
+                        iterations=iterations,
+                        tool_log=tool_log,
+                    )
+
+                # ── Record assistant message with tool requests ───────
+                messages.append(
+                    Message(
+                        role="assistant",
+                        content=response.content,
+                        tool_calls=response.tool_calls,
+                    )
+                )
+
+                # ── Execute each tool call ────────────────────────────
+                for tc in response.tool_calls:
+                    total_tool_calls += 1
+                    status.update(
+                        f"[bold cyan]Running tool: {tc.name} "
+                        f"({total_tool_calls} calls so far)..."
+                    )
+
+                    try:
+                        result_str = ToolRegistry.execute(
+                            tc.name, tc.arguments, context
+                        )
+                        tool_result = ToolResult(
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                            content=result_str,
+                            is_error=False,
+                        )
+                        consecutive_errors = 0
+                    except Exception as exc:
+                        tool_result = ToolResult(
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                            content=json.dumps({"error": str(exc)}),
+                            is_error=True,
+                        )
+                        consecutive_errors += 1
+
+                    messages.append(
+                        Message(role="tool", tool_result=tool_result)
+                    )
+                    tool_log.append(
+                        {
+                            "iteration": iterations,
+                            "tool": tc.name,
+                            "args": tc.arguments,
+                            "is_error": tool_result.is_error,
+                        }
+                    )
+
+                    if self.verbose:
+                        err_flag = "ERROR" if tool_result.is_error else "OK"
+                        console.print(
+                            f"  [dim]Tool: {tc.name}({tc.arguments}) "
+                            f"-> {err_flag}[/dim]"
+                        )
+
+                # ── Too many consecutive errors → force conclusion ────
+                if consecutive_errors >= self.max_consecutive_errors:
+                    messages.append(
+                        Message(
+                            role="user",
+                            content=(
+                                "Multiple consecutive tool errors occurred. "
+                                "Please provide your analysis based on the "
+                                "data gathered so far."
+                            ),
+                        )
+                    )
+                    final = self.client.chat(
+                        messages=messages, system=self.system_prompt
+                    )
+                    return AgentResponse(
+                        provider=final.provider,
+                        model=final.model,
+                        text=final.content or "(No response after errors)",
+                        tool_calls_made=total_tool_calls,
+                        iterations=iterations,
+                        tool_log=tool_log,
+                    )
+
+        # ── Max iterations reached → force conclusion ─────────────────
+        messages.append(
+            Message(
+                role="user",
+                content=(
+                    "You have reached the maximum number of analysis "
+                    "iterations. Please synthesise your findings now and "
+                    "produce the final report."
+                ),
+            )
+        )
+        final = self.client.chat(messages=messages, system=self.system_prompt)
+        return AgentResponse(
+            provider=final.provider,
+            model=final.model,
+            text=final.content or "(No response at max iterations)",
+            tool_calls_made=total_tool_calls,
+            iterations=iterations + 1,
+            tool_log=tool_log,
+        )
