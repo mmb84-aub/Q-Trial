@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -10,6 +11,22 @@ if TYPE_CHECKING:
     from qtrial_backend.agent.context import AgentContext
 
 MAX_TOOL_RESULT_CHARS = 4_000
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively replace NaN/Inf floats with None for spec-compliant JSON.
+
+    json.dumps() by default serialises NaN/Inf as the literals NaN/Infinity,
+    which are valid Python but not valid JSON — Gemini (and strict parsers)
+    reject them.
+    """
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
 
 
 @dataclass
@@ -59,7 +76,9 @@ class ToolRegistry:
         tool = cls.get(name)
         params = tool.params_model.model_validate(arguments)
         result = tool.func(params, context)
-        result_str = json.dumps(result, default=str, ensure_ascii=False)
+        result_str = json.dumps(
+            _sanitize_for_json(result), default=str, ensure_ascii=False
+        )
         if len(result_str) > MAX_TOOL_RESULT_CHARS:
             result_str = (
                 result_str[:MAX_TOOL_RESULT_CHARS]

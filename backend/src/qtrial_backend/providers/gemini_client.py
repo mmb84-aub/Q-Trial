@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 import uuid
 from typing import Any
 
@@ -48,6 +50,9 @@ class GeminiClient(LLMClient):
 
     # ── Agentic chat (google-genai with tool calling) ─────────────────
 
+    _MAX_RETRIES = 3
+    _DEFAULT_WAIT = 60.0  # seconds to wait when delay cannot be parsed
+
     def chat(
         self,
         messages: list[Message],
@@ -62,11 +67,28 @@ class GeminiClient(LLMClient):
         if tools:
             config.tools = to_gemini_tools(tools)
 
-        resp = self.client.models.generate_content(
-            model=self.model,
-            contents=contents,
-            config=config,
-        )
+        for attempt in range(self._MAX_RETRIES + 1):
+            try:
+                resp = self.client.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                )
+                break  # success — exit retry loop
+            except Exception as exc:
+                err_str = str(exc)
+                is_rate_limit = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+                if is_rate_limit and attempt < self._MAX_RETRIES:
+                    match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str)
+                    wait = float(match.group(1)) if match else self._DEFAULT_WAIT
+                    print(
+                        f"[Gemini] Rate limit hit. "
+                        f"Waiting {wait:.0f}s before retry "
+                        f"({attempt + 1}/{self._MAX_RETRIES})..."
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
 
         content_text = ""
         tool_calls: list[ToolCall] = []
