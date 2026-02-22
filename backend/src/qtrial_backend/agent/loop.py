@@ -91,10 +91,43 @@ class AgentLoop:
                         f"({total_tool_calls} calls so far)..."
                     )
 
+                    # ── Deduplication check ────────────────────────────
+                    cache_key = (
+                        f"{tc.name}::"
+                        + json.dumps(tc.arguments, sort_keys=True, default=str)
+                    )
+                    if cache_key in context._call_cache:
+                        cached_result = context._call_cache[cache_key]
+                        tool_result = ToolResult(
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                            content=cached_result,
+                            is_error=False,
+                        )
+                        if self.verbose:
+                            console.print(
+                                f"  [dim]Tool: {tc.name}({tc.arguments}) "
+                                f"-> CACHED[/dim]"
+                            )
+                        messages.append(
+                            Message(role="tool", tool_result=tool_result)
+                        )
+                        tool_log.append(
+                            {
+                                "iteration": iterations,
+                                "tool": tc.name,
+                                "args": tc.arguments,
+                                "is_error": False,
+                                "cached": True,
+                            }
+                        )
+                        continue
+
                     try:
                         result_str = ToolRegistry.execute(
                             tc.name, tc.arguments, context
                         )
+                        context._call_cache[cache_key] = result_str
                         tool_result = ToolResult(
                             tool_call_id=tc.id,
                             name=tc.name,
@@ -120,6 +153,7 @@ class AgentLoop:
                             "tool": tc.name,
                             "args": tc.arguments,
                             "is_error": tool_result.is_error,
+                            "cached": False,
                         }
                     )
 

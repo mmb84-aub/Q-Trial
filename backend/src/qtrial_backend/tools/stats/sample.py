@@ -18,6 +18,10 @@ class SampleRowsParams(BaseModel):
     random: bool = Field(
         default=True, description="Random sample vs first N rows"
     )
+    seed: int = Field(
+        default=42,
+        description="Random seed for reproducibility (default 42).",
+    )
 
 
 @tool(
@@ -46,7 +50,7 @@ def sample_rows(params: SampleRowsParams, ctx: AgentContext) -> dict:
         return {"rows": [], "total_matching": 0}
 
     if params.random and len(df) > n:
-        sample = df.sample(n=n, random_state=42)
+        sample = df.sample(n=n, random_state=params.seed)
     else:
         sample = df.head(n)
 
