@@ -1,6 +1,3 @@
-# Legacy prompt for the single-shot `insights` CLI command.
-# This command sends one LLM call without tools and returns quick bullet-point observations.
-# For the full agentic analysis, see agent_system.py (used by the `analyze` command).
 from __future__ import annotations
 
 SYSTEM_PROMPT = """You are a data analyst focused on clinical trial datasets.
