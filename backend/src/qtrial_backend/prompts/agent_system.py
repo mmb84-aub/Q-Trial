@@ -160,12 +160,21 @@ Secondary findings with supporting statistics.
 KM curves summary, median survival by group, log-rank p-value, \
 Cox HR with 95% CI and C-statistic.
 
-### 6. Literature Comparison
+### 6. Feature Relations & Derived Features
+Summarise every notable relationship discovered between features \
+(correlations, interactions, confounders, collinearities). \
+Propose new features that could be derived from existing columns \
+(e.g. ratios, differences, composite scores, binned categories) \
+and explain what clinical or analytical value each would add. \
+Highlight any underlying patterns, clusters, or subgroup structures \
+that emerged from the data.
+
+### 7. Literature Comparison
 How your findings compare to published benchmarks. \
 Each claim must cite a paper registered in citation_manager. \
 Format each citation as: Author (Year). Title. Source. [ID: paper_id]
 
-### 7. Recommendations
+### 8. Recommendations
 Unresolved questions, sensitivity analyses to run, data quality \
 concerns, and suggested next steps.
 """
@@ -176,7 +185,7 @@ Shape: {rows} rows × {cols} columns
 
 Column names and dtypes:
 {schema}
-
+{column_descriptions}
 First 5 rows (preview — not representative of full data; \
 use tools for missingness, distributions, and statistics):
 {preview_json}

@@ -18,6 +18,9 @@ class Settings:
     anthropic_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
     claude_model: str = os.getenv("CLAUDE_MODEL", "claude-opus-4-6")
 
+    openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
+
     # NCBI E-utilities (optional, increases PubMed rate limit)
     ncbi_api_key: str | None = os.getenv("NCBI_API_KEY")
 

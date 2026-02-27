@@ -21,7 +21,7 @@ console = Console()
 @app.command()
 def insights(
     file: str = typer.Option(..., "--file", "-f", help="Path to CSV/XLSX dataset"),
-    provider: ProviderName = typer.Option("openai", "--provider", "-p", help="openai|gemini|claude"),
+    provider: ProviderName = typer.Option("openai", "--provider", "-p", help="openai|gemini|claude|openrouter"),
     max_rows: int = typer.Option(25, help="Rows to include in preview"),
     max_cols: int = typer.Option(30, help="Columns to include in preview"),
 ):
@@ -50,13 +50,19 @@ def analyze(
         ..., "--file", "-f", help="Path to CSV/XLSX dataset"
     ),
     provider: ProviderName = typer.Option(
-        "openai", "--provider", "-p", help="openai|gemini|claude"
+        "openai", "--provider", "-p", help="openai|gemini|claude|openrouter"
     ),
     max_iterations: int = typer.Option(
         25, "--max-iterations", "-i", help="Maximum agent loop iterations"
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show tool call details"
+    ),
+    data_dictionary: str = typer.Option(
+        None,
+        "--data-dictionary",
+        "-d",
+        help="Path to JSON file mapping column names to plain-English descriptions",
     ),
 ):
     """
@@ -79,7 +85,17 @@ def analyze(
     dataset_name = Path(file).name
     context = AgentContext(dataframe=df, dataset_name=dataset_name)
 
-    # 2. Build initial message with schema and brief preview
+    # 2. Load optional data dictionary
+    column_desc_block = ""
+    if data_dictionary:
+        with open(data_dictionary, "r", encoding="utf-8") as fh:
+            col_descs: dict[str, str] = json.load(fh)
+        lines = ["\nColumn descriptions (authoritative — do not infer meaning from names alone):"]
+        for col, desc in col_descs.items():
+            lines.append(f"  {col}: {desc}")
+        column_desc_block = "\n".join(lines) + "\n"
+
+    # 3. Build initial message with schema and brief preview
     preview = build_dataset_preview(df, max_rows=5, max_cols=30)
     schema = {c: str(df[c].dtype) for c in df.columns}
     initial_msg = INITIAL_USER_MESSAGE_TEMPLATE.format(
@@ -87,6 +103,7 @@ def analyze(
         rows=context.shape[0],
         cols=context.shape[1],
         schema=json.dumps(schema, indent=2),
+        column_descriptions=column_desc_block,
         preview_json=json.dumps(preview["head"][:5], indent=2, default=str),
     )
 
