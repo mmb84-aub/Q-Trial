@@ -74,8 +74,25 @@ _UNIT_PLAUSIBILITY: list[tuple[str, float, float, str]] = [
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _col_lower(col: str) -> str:
-    return col.lower().replace(" ", "_").replace("-", "_")
+def _matches_pattern(col: str, pattern: str) -> bool:
+    """
+    Word-level match: pattern must appear as a complete word (delimited by
+    underscores, hyphens, spaces, or column boundaries) in the normalised
+    column name.  Prevents 'age' matching 'stage', 'alt' matching 'platelet', etc.
+    """
+    # Normalise column name to lowercase words separated by underscores
+    normalised = re.sub(r"[\s\-]+", "_", col.lower())
+    # Split into tokens and check exact token match
+    tokens = normalised.split("_")
+    if pattern in tokens:
+        return True
+    # Also accept if normalised starts or ends with pattern (e.g. "alk_phos" for "alk_phos")
+    if normalised == pattern:
+        return True
+    # Accept multi-word patterns (e.g. "alk_phos" inside "serum_alk_phos")
+    if f"_{pattern}" in normalised or f"{pattern}_" in normalised:
+        return True
+    return False
 
 
 def _is_id_col(col: str) -> bool:
@@ -147,9 +164,8 @@ def _check_range_constraints(df: pd.DataFrame) -> list[dict]:
     numeric_cols = df.select_dtypes(include="number").columns
 
     for col in numeric_cols:
-        cl = _col_lower(col)
         for pattern, lo, hi, unit in _RANGE_CATALOGUE:
-            if pattern not in cl:
+            if not _matches_pattern(col, pattern):
                 continue
             series = df[col].dropna()
             if len(series) == 0:
@@ -196,9 +212,8 @@ def _check_unit_plausibility(df: pd.DataFrame) -> list[dict]:
     numeric_cols = df.select_dtypes(include="number").columns
 
     for col in numeric_cols:
-        cl = _col_lower(col)
         for pattern, med_lo, med_hi, warning in _UNIT_PLAUSIBILITY:
-            if pattern not in cl:
+            if not _matches_pattern(col, pattern):
                 continue
             series = df[col].dropna()
             if len(series) < 3:
