@@ -16,6 +16,8 @@ from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.planner import call_planner
 from typing import Any
 
+from rich.prompt import Confirm, Prompt
+
 from qtrial_backend.agentic.reasoning import run_reasoning_engine
 from qtrial_backend.agentic.hypothesis_gen import (
     generate_dynamic_hypotheses,
@@ -199,6 +201,230 @@ def _tag_unresolved_unknowns(
     return unknowns.model_copy(update={"unresolved_high_impact": still_open})
 
 
+# ── Task 3: interactive closed-loop Q&A ───────────────────────────────────────
+
+def _interactive_qa_loop(
+    *,
+    initial_unknowns: UnknownsOutput,
+    initial_metadata: MetadataInput | None,
+    initial_insights: InsightSynthesisOutput,
+    initial_judge: Any,  # JudgeOutput | None
+    preview: dict,
+    evidence: dict,
+    citations: list,
+    plan: Any,
+    collected: dict,
+    provider: ProviderName,
+    run_judge: bool,
+    analysis_report: str | None,
+    typed_tool_log: list[ToolCallRecord] | None,
+    agent_runs: list[AgentRunRecord],
+    max_iterations: int = 5,
+) -> tuple[MetadataInput | None, InsightSynthesisOutput, Any, UnknownsOutput]:
+    """
+    Interactive closed-loop: present unresolved high-impact unknowns to the
+    user one-by-one, collect answers, merge them into MetadataInput, re-run
+    ClinicalSemanticsAgent → UnknownsAgent → InsightSynthesisAgent → Judge,
+    and repeat until all critical unknowns are resolved or the user stops.
+
+    Returns the final (metadata, insights, judge, unknowns) after the loop.
+    """
+    current_metadata = initial_metadata
+    current_insights = initial_insights
+    current_judge = initial_judge
+    current_unknowns = initial_unknowns
+
+    for iteration in range(1, max_iterations + 1):
+        still_open = current_unknowns.unresolved_high_impact
+        if not still_open:
+            console.print("\n[green]✓ All critical unknowns resolved.[/green]")
+            break
+
+        console.print(
+            f"\n[bold cyan]── Closed-loop iteration "
+            f"{iteration}/{max_iterations} ──[/bold cyan]"
+        )
+        console.print(
+            f"[yellow]{len(still_open)} high-impact unknown(s) remain. "
+            "Provide answers below, or press Enter to skip a question.[/yellow]\n"
+        )
+
+        new_answers: dict[str, str] = {}
+        for idx, question in enumerate(still_open, 1):
+            answer = Prompt.ask(
+                f"  [{idx}/{len(still_open)}] {question}\n  [dim]Your answer[/dim]",
+                default="",
+            )
+            if answer.strip():
+                new_answers[question] = answer.strip()
+
+        if not new_answers:
+            console.print("[dim]No answers provided — stopping loop.[/dim]")
+            break
+
+        # Merge new free-form answers into existing metadata
+        existing_additional: dict[str, str] = (
+            dict(current_metadata.additional_answers)
+            if current_metadata and current_metadata.additional_answers
+            else {}
+        )
+        existing_additional.update(new_answers)
+
+        base = (
+            current_metadata.model_dump(exclude_none=True)
+            if current_metadata
+            else {}
+        )
+        base["additional_answers"] = existing_additional
+        current_metadata = MetadataInput.model_validate(base)
+
+        # Enrich evidence with updated metadata
+        meta_block = _render_metadata_block(current_metadata)
+        enriched = dict(evidence)
+        enriched["__user_metadata__"] = current_metadata.model_dump(exclude_none=True)
+        enriched["__metadata_text__"] = meta_block
+        loop_label = f"loop{iteration}"
+
+        # Re-run ClinicalSemanticsAgent when semantics-related answers were given
+        if _metadata_covers_semantics(current_metadata):
+            cs_step = next(
+                (s for s in plan.steps
+                 if s.agent_to_call == "ClinicalSemanticsAgent"),
+                plan.steps[0],
+            )
+            console.print(
+                f"  [yellow]▸ Re-running ClinicalSemanticsAgent "
+                f"({loop_label})…[/yellow]"
+            )
+            cs_refreshed = run_clinical_semantics_agent(
+                preview, enriched, cs_step, provider,
+                prior_analysis_report=analysis_report,
+                tool_log=typed_tool_log,
+            )
+            collected["ClinicalSemanticsAgent"] = cs_refreshed.model_dump()
+            agent_runs.append(
+                AgentRunRecord(
+                    step_number=len(agent_runs) + 1,
+                    agent=f"ClinicalSemanticsAgent ({loop_label})",
+                    goal=f"Re-run semantics with answers from {loop_label}",
+                    output=cs_refreshed.model_dump(),
+                )
+            )
+            console.print(
+                f"    [green]✓ ClinicalSemanticsAgent ({loop_label})[/green]"
+            )
+
+        # Re-run UnknownsAgent to surface any newly-resolvable unknowns
+        ua_step = next(
+            (s for s in plan.steps if s.agent_to_call == "UnknownsAgent"),
+            plan.steps[0],
+        )
+        console.print(
+            f"  [yellow]▸ Re-running UnknownsAgent ({loop_label})…[/yellow]"
+        )
+        ua_refreshed = run_unknowns_agent(
+            preview, enriched,
+            collected.get("DataQualityAgent"),
+            collected.get("ClinicalSemanticsAgent"),
+            ua_step, provider,
+            prior_analysis_report=analysis_report,
+            tool_log=typed_tool_log,
+        )
+        collected["UnknownsAgent"] = ua_refreshed.model_dump()
+        agent_runs.append(
+            AgentRunRecord(
+                step_number=len(agent_runs) + 1,
+                agent=f"UnknownsAgent ({loop_label})",
+                goal=f"Re-surface unknowns after {loop_label} answers",
+                output=ua_refreshed.model_dump(),
+            )
+        )
+        console.print(
+            f"    [green]✓ UnknownsAgent ({loop_label})[/green]"
+        )
+
+        # Re-run InsightSynthesisAgent with updated context
+        unknowns_enriched = dict(ua_refreshed.model_dump())
+        unknowns_enriched["__metadata_text__"] = meta_block
+        console.print(
+            f"  [yellow]▸ Re-running InsightSynthesisAgent ({loop_label})…[/yellow]"
+        )
+        insights_refreshed = run_insight_synthesis_agent(
+            preview, enriched,
+            collected.get("DataQualityAgent"),
+            collected.get("ClinicalSemanticsAgent"),
+            provider,
+            citations=citations,
+            unknowns_output=unknowns_enriched,
+            prior_analysis_report=analysis_report,
+            tool_log=typed_tool_log,
+        )
+        collected["InsightSynthesisAgent"] = insights_refreshed.model_dump()
+        agent_runs.append(
+            AgentRunRecord(
+                step_number=len(agent_runs) + 1,
+                agent=f"InsightSynthesisAgent ({loop_label})",
+                goal=f"Re-synthesise insights with metadata from {loop_label}",
+                output=insights_refreshed.model_dump(),
+            )
+        )
+        current_insights = insights_refreshed
+        console.print(
+            f"    [green]✓ InsightSynthesisAgent ({loop_label})[/green]"
+        )
+
+        # Re-run Judge on updated synthesis
+        if run_judge:
+            console.print(
+                f"  [yellow]▸ Re-running JudgeAgent ({loop_label})…[/yellow]"
+            )
+            judge_refreshed = run_judge_agent(
+                final_insights=current_insights,
+                evidence=enriched,
+                unknowns=ua_refreshed,
+                provider=provider,
+            )
+            current_judge = judge_refreshed
+            console.print(
+                f"  [green]Judge ({loop_label}):[/green] "
+                f"{judge_refreshed.overall_score}/100 | "
+                f"Failed claims: {len(judge_refreshed.failed_claims)}"
+            )
+
+        # Re-tag unresolved unknowns with the updated metadata
+        current_unknowns = _tag_unresolved_unknowns(ua_refreshed, current_metadata)
+
+        remaining = current_unknowns.unresolved_high_impact
+        if remaining:
+            console.print(
+                f"\n  [yellow]{len(remaining)} high-impact unknown(s) "
+                "still open after this iteration.[/yellow]"
+            )
+        else:
+            console.print(
+                "\n  [green]✓ All high-impact unknowns resolved![/green]"
+            )
+            break
+
+        # Ask user whether to continue before the next iteration
+        if iteration < max_iterations:
+            keep_going = Confirm.ask(
+                "\n  Continue answering questions?",
+                default=False,
+            )
+            if not keep_going:
+                console.print("[dim]Loop stopped by user.[/dim]")
+                break
+    else:
+        # max_iterations exhausted without full resolution
+        console.print(
+            f"[yellow]⚠ Reached max loop iterations ({max_iterations}). "
+            "Remaining unknowns left as unresolved.[/yellow]"
+        )
+
+    return current_metadata, current_insights, current_judge, current_unknowns
+
+
 def run_agentic_insights(
     df: pd.DataFrame,
     provider: ProviderName,
@@ -206,6 +432,7 @@ def run_agentic_insights(
     max_cols: int = 30,
     run_judge: bool = True,
     metadata: MetadataInput | None = None,
+    interactive: bool = False,
     # ── upstream statistical context (both default to None — backward compat) ──
     analysis_report: str | None = None,
     tool_log: list[dict[str, Any]] | None = None,
@@ -444,6 +671,44 @@ def run_agentic_insights(
                 f"Failed claims: {len(judge_after.failed_claims)}"
             )
 
+    # ── Step viii: interactive closed-loop Q&A ────────────────────────────
+    loop_metadata: MetadataInput | None = metadata
+    loop_insights: InsightSynthesisOutput | None = None
+    loop_judge: Any = None
+    loop_unknowns: UnknownsOutput | None = None
+
+    if interactive:
+        # Start from the best state produced so far
+        _start_insights = insights_after if insights_after is not None else final_insights
+        _start_judge = judge_after if judge_after is not None else judge_output
+        _start_meta = metadata  # may be None if no --metadata file was given
+
+        console.print(
+            "\n[bold cyan]► Interactive closed-loop Q&A[/bold cyan]"
+        )
+        loop_metadata, loop_insights, loop_judge, loop_unknowns = _interactive_qa_loop(
+            initial_unknowns=unknowns,
+            initial_metadata=_start_meta,
+            initial_insights=_start_insights,
+            initial_judge=_start_judge,
+            preview=preview,
+            evidence=evidence,
+            citations=citations,
+            plan=plan,
+            collected=collected,
+            provider=provider,
+            run_judge=run_judge,
+            analysis_report=analysis_report,
+            typed_tool_log=typed_tool_log,
+            agent_runs=agent_runs,
+        )
+        # Propagate loop results so they are used as canonical values below
+        if loop_unknowns is not None:
+            unknowns = loop_unknowns
+        if loop_insights is not None:
+            insights_after = loop_insights
+            judge_after = loop_judge
+
     # ── Determine canonical values (latest available) ─────────────────────
     best_insights = insights_after if insights_after is not None else final_insights
     best_judge = judge_after if judge_after is not None else judge_output
@@ -504,6 +769,9 @@ def run_agentic_insights(
             f"  [yellow]⚠ Dynamic hypothesis generation skipped: {exc}[/yellow]"
         )
 
+    # Use the accumulated metadata (may have been enriched by interactive loop)
+    final_metadata = loop_metadata if interactive else metadata
+
     report = FinalReportSchema(
         provider=provider,
         model=model_name,
@@ -512,7 +780,7 @@ def run_agentic_insights(
         unknowns=unknowns,
         final_insights=best_insights,
         judge=best_judge,
-        metadata_used=metadata,
+        metadata_used=final_metadata,
         final_insights_before=final_insights if metadata is not None else None,
         final_insights_after=insights_after,
         judge_before=judge_output if metadata is not None else None,
