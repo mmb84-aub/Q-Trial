@@ -1,0 +1,40 @@
+{
+  "_comment": "Metadata template for Q-Trial sample_pbc.csv.  Remove underscore keys before use or leave them (they are stripped automatically).",
+
+  "status_mapping": {
+    "0": "censored",
+    "1": "liver_transplant",
+    "2": "death"
+  },
+
+  "primary_endpoint": "Composite of death or liver transplantation, measured from date of trial registration.",
+
+  "time_unit": "days",
+
+  "study_design": "Double-blind randomised placebo-controlled trial (D-penicillamine vs placebo) with parallel observational registry",
+
+  "treatment_arms": {
+    "1": "D-penicillamine",
+    "2": "placebo"
+  },
+
+  "lab_units": [
+    { "column": "bili",     "unit": "mg/dL",        "normal_range": "0.3-1.2 mg/dL" },
+    { "column": "chol",     "unit": "mg/dL",        "normal_range": "< 200 mg/dL" },
+    { "column": "albumin",  "unit": "g/dL",         "normal_range": "3.5-5.0 g/dL" },
+    { "column": "copper",   "unit": "ug/day",       "normal_range": null },
+    { "column": "alk.phos", "unit": "U/liter",      "normal_range": null },
+    { "column": "ast",      "unit": "U/mL",         "normal_range": null },
+    { "column": "trig",     "unit": "mg/dL",        "normal_range": null },
+    { "column": "platelet", "unit": "per cubic mL/1000", "normal_range": "150-400" },
+    { "column": "protime",  "unit": "seconds",      "normal_range": "9-12 s" },
+    { "column": "age",      "unit": "years",        "normal_range": null }
+  ],
+
+  "additional_answers": {
+    "What does the stage column represent?": "Histologic stage of PBC (1-4) per Ludwig criteria.",
+    "Is sex coded numerically or as a string?": "String: f = female, m = male.",
+    "What is the clinical significance of edema?": "0 = no edema, 0.5 = untreated or successfully treated edema, 1 = edema despite diuretic therapy.",
+    "Are all 418 patients part of the RCT?": "No. 312 participated in the RCT; 106 consented only to observational registry (trt is NA for them)."
+  }
+}
