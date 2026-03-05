@@ -30,6 +30,7 @@ from qtrial_backend.agentic.hypothesis_tool_dispatch import (
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
     FinalReportSchema,
+    GuardrailReport,
     InsightSynthesisOutput,
     MetadataInput,
     ToolCallRecord,
@@ -38,6 +39,7 @@ from qtrial_backend.agentic.schemas import (
 from qtrial_backend.core.router import get_client
 from qtrial_backend.core.types import ProviderName
 from qtrial_backend.dataset.evidence import build_dataset_evidence, format_citations
+from qtrial_backend.dataset.guardrails import format_guardrail_citations, run_guardrails
 from qtrial_backend.dataset.preview import build_dataset_preview
 
 console = Console()
@@ -468,7 +470,44 @@ def run_agentic_insights(
     console.print("[bold cyan]► Step 2/5:[/bold cyan] Computing deterministic evidence…")
     evidence = build_dataset_evidence(df)
     citations = format_citations(evidence)
+    # ── Step 2b: robustness guardrails (deterministic, no LLM) ───────────────
+    _guardrail_raw = run_guardrails(df)
+    guardrail_report = GuardrailReport.model_validate(_guardrail_raw)
+    evidence["__guardrails__"] = _guardrail_raw   # agents see raw dict
+    guardrail_citations = format_guardrail_citations(_guardrail_raw)
+    if guardrail_citations:
+        citations["guardrails"] = guardrail_citations
 
+    _g_flags = _guardrail_raw["flags"]
+    _g_hi = sum(1 for f in _g_flags if f["severity"] == "high")
+    _g_rm = _guardrail_raw["repeated_measures"]
+    _g_parts = []
+    if _g_flags:
+        _g_parts.append(
+            f"{len(_g_flags)} flag(s) "
+            f"([bold red]{_g_hi} high[/bold red] / "
+            f"{len(_g_flags) - _g_hi} other)"
+        )
+    if _g_rm:
+        _g_parts.append(
+            "[yellow]repeated-measures schema detected[/yellow]"
+            f" (id={_g_rm['id_column']}, "
+            f"max_repeats={_g_rm['max_repeats_per_subject']})"
+        )
+    if _g_parts:
+        console.print(
+            "  [bold yellow]\u26a0 Guardrails:[/bold yellow] "
+            + " | ".join(_g_parts)
+        )
+        for _gf in _g_flags:
+            _icon = "[red]\u25cf[/red]" if _gf["severity"] == "high" else "[yellow]\u25cf[/yellow]"
+            console.print(
+                f"    {_icon} [{_gf['check_type']}] "
+                f"{_gf.get('column', '')}\u2014"
+                f"{_gf['detail'][:100]}"
+            )
+    else:
+        console.print("  [green]\u2713 Guardrails: all checks passed[/green]")
     # Attach metadata as a top-level evidence key so all agents see it
     if metadata is not None:
         evidence["__user_metadata__"] = metadata.model_dump(exclude_none=True)
@@ -885,6 +924,7 @@ def run_agentic_insights(
         prior_analysis_report=analysis_report,
         tool_log=typed_tool_log,
         reasoning_state=reasoning_state,
+        guardrail_report=guardrail_report,
     )
 
     # Persist compact tool_log (large results are truncated)

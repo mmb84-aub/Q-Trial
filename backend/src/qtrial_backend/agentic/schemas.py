@@ -45,6 +45,52 @@ class DataQualityOutput(BaseModel):
     summary: str
 
 
+# ── Task 5 — Robustness Guardrails ───────────────────────────────────────────
+
+GuardrailCheckType = Literal[
+    "low_cardinality_numeric",
+    "range_violation",
+    "unit_plausibility",
+    "repeated_measures",
+]
+
+
+class GuardrailFlag(BaseModel):
+    """
+    A single robustness flag produced by the deterministic guardrail checks.
+    Attached to evidence as ``guardrails[i]`` citations.
+    """
+    check_type: GuardrailCheckType
+    column: str | None = None
+    severity: Literal["high", "medium", "low"]
+    detail: str
+    suggested_action: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepeatedMeasuresSchema(BaseModel):
+    """Schema details when a repeated-measures / longitudinal design is inferred."""
+    id_column: str
+    n_subjects: int
+    total_rows: int
+    max_repeats_per_subject: int
+    n_subjects_with_repeats: int
+    likely_longitudinal: bool
+    detail: str
+
+
+class GuardrailReport(BaseModel):
+    """
+    Aggregated results from all four Task 5 robustness guardrail checks.
+    Stored in FinalReportSchema and injected into evidence so all agents
+    can cite ``guardrails[i]`` and ``guardrails.repeated_measures``.
+    """
+    flags: list[GuardrailFlag] = Field(default_factory=list)
+    repeated_measures: RepeatedMeasuresSchema | None = None
+    summary: str = ""
+    counts_by_type: dict[str, int] = Field(default_factory=dict)
+
+
 # ── ClinicalSemanticsAgent ────────────────────────────────────────────────────
 
 ColumnRole = Literal[
@@ -598,5 +644,13 @@ class FinalReportSchema(BaseModel):
         description=(
             "Structured reasoning state produced by the Task 4A/4B reasoning "
             "engine.  None in runs that predate Task 4B wiring."
+        ),
+    )
+    # Task 5 — robustness guardrails (None in runs that predate Task 5)
+    guardrail_report: GuardrailReport | None = Field(
+        default=None,
+        description=(
+            "Robustness guardrail flags: low-cardinality numerics, range "
+            "violations, unit plausibility, and repeated-measures schema inference."
         ),
     )
