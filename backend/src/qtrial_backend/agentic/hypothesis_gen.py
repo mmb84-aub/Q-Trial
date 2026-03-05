@@ -1,10 +1,11 @@
-"""
-Task 4C — Dynamic Hypothesis & Question Generation Layer.
+"""Task 4C — Dynamic Hypothesis & Question Generation Layer.
 
 Uses a single LLM call to produce:
   1. Candidate hypotheses with evidence citations
   2. Falsification checks (one per hypothesis)
   3. Hidden questions ("questions we didn't know to ask")
+  4. Structured tool dispatch requests (Task 4B) — stats tools to run
+     so the orchestrator can investigate hypotheses empirically.
 
 The LLM output is strictly schema-validated (Pydantic), then passed
 through the Task 4A deterministic validators (citation validation,
@@ -35,6 +36,7 @@ from qtrial_backend.agentic.schemas import (
     ReasoningState,
     StopCondition,
     ToolCallRecord,
+    ToolDispatchRequest,
 )
 from qtrial_backend.core.types import ProviderName
 
@@ -44,8 +46,8 @@ from qtrial_backend.core.types import ProviderName
 _HYPO_SYSTEM = textwrap.dedent("""\
     You are HypothesisGeneratorAgent, a clinical trial reasoning specialist.
     Given a dataset preview, computed evidence, agent outputs, and optional
-    context, generate candidate hypotheses, falsification checks, and hidden
-    questions.
+    context, generate candidate hypotheses, falsification checks, hidden
+    questions, and structured tool dispatch requests.
 
     Respond with ONLY valid JSON matching the schema below.
     No markdown fences, no commentary outside the JSON object.
@@ -55,11 +57,20 @@ _HYPO_SYSTEM = textwrap.dedent("""\
       MUST come from the VALID_CITATION_KEYS list in the user message.
     - Do NOT invent citation keys.
     - Allowed formats: evidence.*, preview.*, tool_log[i]
+
+    TOOL DISPATCH RULES:
+    - tool_type must be exactly one of:
+        baseline_balance | survival_analysis | missing_by_group |
+        group_statistics | distribution_check
+    - columns must contain ONLY column names visible in the DATASET_PREVIEW schema.
+    - group_column (optional) must also be a real column name.
+    - Generate at most 4 tool_dispatch_requests total, prioritising high-impact ones.
+    - Each request must link to a hypothesis_id defined in the hypotheses list.
 """)
 
 _HYPO_USER = textwrap.dedent("""\
-    Generate candidate hypotheses, falsification checks, and hidden questions
-    for this clinical trial dataset.
+    Generate candidate hypotheses, falsification checks, hidden questions,
+    and structured tool dispatch requests for this clinical trial dataset.
 
     Required JSON schema:
     {{
@@ -89,6 +100,16 @@ _HYPO_USER = textwrap.dedent("""\
           "impact": "<high|medium|low>",
           "category": "<protocol|endpoint_definition|data_provenance|statistical_plan|population|regulatory|other>",
           "suggested_data_source": "<where to look for the answer>"
+        }}
+      ],
+      "tool_dispatch_requests": [
+        {{
+          "tool_type": "<baseline_balance|survival_analysis|missing_by_group|group_statistics|distribution_check>",
+          "hypothesis_id": "<hypothesis_id this investigation supports>",
+          "columns": ["<real column name from dataset>", ...],
+          "group_column": "<real column name or null>",
+          "rationale": "<one sentence: why this tool tests/falsifies the hypothesis>",
+          "priority": "<high|medium|low>"
         }}
       ]
     }}

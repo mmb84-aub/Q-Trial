@@ -23,6 +23,10 @@ from qtrial_backend.agentic.hypothesis_gen import (
     generate_dynamic_hypotheses,
     integrate_dynamic_hypotheses,
 )
+from qtrial_backend.agentic.hypothesis_tool_dispatch import (
+    run_tool_dispatch,
+    format_dispatch_results_for_agents,
+)
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
     FinalReportSchema,
@@ -736,6 +740,7 @@ def run_agentic_insights(
     )
 
     # ── Task 4C: dynamic hypothesis generation (LLM) ────────────────────
+    hypo_output = None
     try:
         console.print(
             "[bold cyan]► Hypothesis Generator:[/bold cyan] "
@@ -764,10 +769,102 @@ def run_agentic_insights(
             f"{len(reasoning_state.hidden_questions)} hidden questions, "
             f"{len(reasoning_state.step_log)} total steps"
         )
+        if hypo_output.tool_dispatch_requests:
+            console.print(
+                f"  [dim]  Tool dispatch requests: "
+                f"{len(hypo_output.tool_dispatch_requests)}[/dim]"
+            )
     except Exception as exc:
         console.print(
             f"  [yellow]⚠ Dynamic hypothesis generation skipped: {exc}[/yellow]"
         )
+
+    # ── Task 4B: hypothesis-driven tool dispatch ──────────────────────────────
+    if hypo_output is not None and hypo_output.tool_dispatch_requests:
+        try:
+            console.print(
+                "[bold cyan]► Tool Dispatch:[/bold cyan] "
+                "Running hypothesis-driven investigations…"
+            )
+            dispatch_results = run_tool_dispatch(
+                hypo_output.tool_dispatch_requests, df
+            )
+            reasoning_state.dispatched_tool_results = dispatch_results
+
+            n_ok = sum(1 for r in dispatch_results if r.error is None)
+            n_err = len(dispatch_results) - n_ok
+            console.print(
+                f"  [green]✓ Dispatch:[/green] {n_ok} tool(s) completed, "
+                f"{n_err} skipped/errored"
+            )
+            for r in dispatch_results:
+                status = "✓" if r.error is None else "✗"
+                console.print(
+                    f"    [{status}] [{r.citation_alias}] "
+                    f"{r.tool_called} → h={r.request.hypothesis_id}"
+                )
+
+            if n_ok > 0:
+                dispatch_block = format_dispatch_results_for_agents(dispatch_results)
+                dispatch_context_report = (
+                    (analysis_report + "\n\n" if analysis_report else "")
+                    + dispatch_block
+                )
+
+                # Re-run InsightSynthesisAgent grounded in empirical tool results
+                console.print(
+                    "  [yellow]▸ Re-running InsightSynthesisAgent "
+                    "(grounded in dispatch results)…[/yellow]"
+                )
+                insights_dispatched = run_insight_synthesis_agent(
+                    preview,
+                    evidence,
+                    collected.get("DataQualityAgent"),
+                    collected.get("ClinicalSemanticsAgent"),
+                    provider,
+                    citations=citations,
+                    unknowns_output=collected.get("UnknownsAgent"),
+                    prior_analysis_report=dispatch_context_report,
+                    tool_log=typed_tool_log,
+                )
+                collected["InsightSynthesisAgent"] = insights_dispatched.model_dump()
+                agent_runs.append(
+                    AgentRunRecord(
+                        step_number=len(agent_runs) + 1,
+                        agent="InsightSynthesisAgent (post-dispatch)",
+                        goal="Re-synthesise insights grounded in hypothesis tool results",
+                        output=insights_dispatched.model_dump(),
+                    )
+                )
+                console.print(
+                    "    [green]✓ InsightSynthesisAgent (post-dispatch)[/green]"
+                )
+
+                # Re-run judge on dispatch-grounded synthesis
+                if run_judge:
+                    console.print(
+                        "  [yellow]▸ Re-running JudgeAgent (post-dispatch)…[/yellow]"
+                    )
+                    judge_dispatched = run_judge_agent(
+                        final_insights=insights_dispatched,
+                        evidence=evidence,
+                        unknowns=unknowns,
+                        provider=provider,
+                    )
+                    console.print(
+                        f"  [green]Judge (post-dispatch):[/green] "
+                        f"{judge_dispatched.overall_score}/100 | "
+                        f"Failed claims: {len(judge_dispatched.failed_claims)}"
+                    )
+                    best_insights = insights_dispatched
+                    best_judge = judge_dispatched
+                else:
+                    best_insights = insights_dispatched
+
+        except Exception as exc:
+            console.print(
+                f"  [yellow]⚠ Tool dispatch skipped: {exc}[/yellow]"
+            )
 
     # Use the accumulated metadata (may have been enriched by interactive loop)
     final_metadata = loop_metadata if interactive else metadata
