@@ -32,6 +32,7 @@ from qtrial_backend.agentic.schemas import (
     FinalReportSchema,
     GuardrailReport,
     InsightSynthesisOutput,
+    LiteratureRAGReport,
     MetadataInput,
     ToolCallRecord,
     UnknownsOutput,
@@ -41,6 +42,10 @@ from qtrial_backend.core.types import ProviderName
 from qtrial_backend.dataset.evidence import build_dataset_evidence, format_citations
 from qtrial_backend.dataset.guardrails import format_guardrail_citations, run_guardrails
 from qtrial_backend.dataset.preview import build_dataset_preview
+from qtrial_backend.tools.literature.rag import (
+    format_literature_for_agents,
+    run_literature_rag,
+)
 
 console = Console()
 
@@ -904,7 +909,109 @@ def run_agentic_insights(
             console.print(
                 f"  [yellow]⚠ Tool dispatch skipped: {exc}[/yellow]"
             )
+    # ── Task 6: hypothesis-driven literature RAG ───────────────────────────
+    literature_report: LiteratureRAGReport | None = None
+    lit_block: str = ""
 
+    if reasoning_state.hypotheses:
+        try:
+            console.print(
+                "[bold cyan]\u25ba Literature RAG:[/bold cyan] "
+                "Retrieving hypothesis-grounded papers\u2026"
+            )
+            hypo_dicts = [
+                {"statement": h.statement, "hypothesis_id": h.hypothesis_id}
+                for h in reasoning_state.hypotheses
+            ]
+            literature_report = run_literature_rag(
+                hypotheses=hypo_dicts,
+                preview=preview,
+                evidence=evidence,
+            )
+            n_lit = len(literature_report.articles)
+            if n_lit > 0:
+                console.print(
+                    f"  [green]\u2713 Literature:[/green] {n_lit} article(s) "
+                    f"from {', '.join(literature_report.sources_used)}"
+                )
+                for art in literature_report.articles:
+                    console.print(
+                        f"    [{art.citation_alias}] "
+                        f"{art.title[:70]}{'...' if len(art.title) > 70 else ''} "
+                        f"({art.year or 'n/d'})"
+                    )
+                lit_block = format_literature_for_agents(literature_report)
+
+                # Build combined context: dispatch results + literature
+                existing_report = (
+                    analysis_report or ""
+                )
+                dispatch_str = ""
+                if hypo_output is not None and reasoning_state.dispatched_tool_results:
+                    dispatch_str = format_dispatch_results_for_agents(
+                        reasoning_state.dispatched_tool_results
+                    )
+                parts = [p for p in [existing_report, dispatch_str, lit_block] if p]
+                combined_context = "\n\n".join(parts) if parts else None
+
+                # Final InsightSynthesisAgent grounded in BOTH tool results + literature
+                console.print(
+                    "  [yellow]\u25b8 Re-running InsightSynthesisAgent "
+                    "(grounded in dispatch + literature)\u2026[/yellow]"
+                )
+                insights_lit = run_insight_synthesis_agent(
+                    preview,
+                    evidence,
+                    collected.get("DataQualityAgent"),
+                    collected.get("ClinicalSemanticsAgent"),
+                    provider,
+                    citations=citations,
+                    unknowns_output=collected.get("UnknownsAgent"),
+                    prior_analysis_report=combined_context,
+                    tool_log=typed_tool_log,
+                )
+                collected["InsightSynthesisAgent"] = insights_lit.model_dump()
+                agent_runs.append(
+                    AgentRunRecord(
+                        step_number=len(agent_runs) + 1,
+                        agent="InsightSynthesisAgent (post-literature)",
+                        goal="Re-synthesise insights grounded in tool results + literature",
+                        output=insights_lit.model_dump(),
+                    )
+                )
+                console.print(
+                    "    [green]\u2713 InsightSynthesisAgent (post-literature)[/green]"
+                )
+
+                if run_judge:
+                    console.print(
+                        "  [yellow]\u25b8 Re-running JudgeAgent "
+                        "(post-literature)\u2026[/yellow]"
+                    )
+                    judge_lit = run_judge_agent(
+                        final_insights=insights_lit,
+                        evidence=evidence,
+                        unknowns=unknowns,
+                        provider=provider,
+                    )
+                    console.print(
+                        f"  [green]Judge (post-literature):[/green] "
+                        f"{judge_lit.overall_score}/100 | "
+                        f"Failed claims: {len(judge_lit.failed_claims)}"
+                    )
+                    best_insights = insights_lit
+                    best_judge = judge_lit
+                else:
+                    best_insights = insights_lit
+            else:
+                console.print(
+                    "  [yellow]\u26a0 Literature RAG: no results returned "
+                    "(queries may be too specific or network unavailable)[/yellow]"
+                )
+        except Exception as exc:
+            console.print(
+                f"  [yellow]\u26a0 Literature RAG skipped: {exc}[/yellow]"
+            )
     # Use the accumulated metadata (may have been enriched by interactive loop)
     final_metadata = loop_metadata if interactive else metadata
 
@@ -925,6 +1032,7 @@ def run_agentic_insights(
         tool_log=typed_tool_log,
         reasoning_state=reasoning_state,
         guardrail_report=guardrail_report,
+        literature_report=literature_report,
     )
 
     # Persist compact tool_log (large results are truncated)

@@ -91,6 +91,10 @@ class GuardrailReport(BaseModel):
     counts_by_type: dict[str, int] = Field(default_factory=dict)
 
 
+# ── Task 6 — Literature RAG (models live in tools.literature.rag to avoid circular import) ──
+from qtrial_backend.tools.literature.rag import LiteratureArticle, LiteratureRAGReport  # re-export
+
+
 # ── ClinicalSemanticsAgent ────────────────────────────────────────────────────
 
 ColumnRole = Literal[
@@ -652,5 +656,13 @@ class FinalReportSchema(BaseModel):
         description=(
             "Robustness guardrail flags: low-cardinality numerics, range "
             "violations, unit plausibility, and repeated-measures schema inference."
+        ),
+    )
+    # Task 6 — literature RAG (None when no hypotheses or retrieval disabled)
+    literature_report: LiteratureRAGReport | None = Field(
+        default=None,
+        description=(
+            "Hypothesis-driven literature retrieval results from PubMed / "
+            "Semantic Scholar. Articles appear as lit[i] citations in insights."
         ),
     )

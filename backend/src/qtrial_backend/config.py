@@ -18,5 +18,9 @@ class Settings:
     anthropic_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
     claude_model: str = os.getenv("CLAUDE_MODEL", "claude-opus-4-6")
 
+    # Literature / RAG
+    ncbi_api_key: str | None = os.getenv("NCBI_API_KEY")
+    s2_api_key: str | None = os.getenv("S2_API_KEY")
+
 
 settings = Settings()
