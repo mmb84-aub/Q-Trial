@@ -16,6 +16,11 @@ from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.planner import call_planner
 from typing import Any
 
+from qtrial_backend.agentic.reasoning import run_reasoning_engine
+from qtrial_backend.agentic.hypothesis_gen import (
+    generate_dynamic_hypotheses,
+    integrate_dynamic_hypotheses,
+)
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
     FinalReportSchema,
@@ -272,16 +277,26 @@ def run_agentic_insights(
         )
 
         if agent == "DataQualityAgent":
-            output_obj = run_data_quality_agent(preview, evidence, step, provider)
+            output_obj = run_data_quality_agent(
+                preview, evidence, step, provider,
+                prior_analysis_report=analysis_report,
+                tool_log=typed_tool_log,
+            )
 
         elif agent == "ClinicalSemanticsAgent":
-            output_obj = run_clinical_semantics_agent(preview, evidence, step, provider)
+            output_obj = run_clinical_semantics_agent(
+                preview, evidence, step, provider,
+                prior_analysis_report=analysis_report,
+                tool_log=typed_tool_log,
+            )
 
         elif agent == "UnknownsAgent":
             dq_out = collected.get("DataQualityAgent")
             cs_out = collected.get("ClinicalSemanticsAgent")
             output_obj = run_unknowns_agent(
-                preview, evidence, dq_out, cs_out, step, provider
+                preview, evidence, dq_out, cs_out, step, provider,
+                prior_analysis_report=analysis_report,
+                tool_log=typed_tool_log,
             )
 
         elif agent == "InsightSynthesisAgent":
@@ -293,6 +308,8 @@ def run_agentic_insights(
                 preview, evidence, dq_out, cs_out, provider,
                 citations=citations,
                 unknowns_output=ua_out,
+                prior_analysis_report=analysis_report,
+                tool_log=typed_tool_log,
             )
 
         else:
@@ -379,6 +396,8 @@ def run_agentic_insights(
             )
             cs_refreshed = run_clinical_semantics_agent(
                 preview, enriched, cs_step, provider,
+                prior_analysis_report=analysis_report,
+                tool_log=typed_tool_log,
             )
             collected["ClinicalSemanticsAgent"] = cs_refreshed.model_dump()
             console.print(
@@ -401,6 +420,8 @@ def run_agentic_insights(
             provider,
             citations=citations,
             unknowns_output=unknowns_enriched,
+            prior_analysis_report=analysis_report,
+            tool_log=typed_tool_log,
         )
         console.print(
             "    [green]✓ InsightSynthesisAgent (updated)[/green]"
@@ -427,6 +448,62 @@ def run_agentic_insights(
     best_insights = insights_after if insights_after is not None else final_insights
     best_judge = judge_after if judge_after is not None else judge_output
 
+    # ── Task 4B: deterministic reasoning engine ──────────────────────────
+    console.print(
+        "[bold cyan]► Reasoning Engine:[/bold cyan] "
+        "Running deterministic validation…"
+    )
+    reasoning_state = run_reasoning_engine(
+        run_id=f"{provider}_{model_name}",
+        preview=preview,
+        evidence=evidence,
+        final_insights=best_insights.model_dump(),
+        unknowns=unknowns.model_dump(),
+        metadata=metadata,
+        analysis_report=analysis_report,
+        tool_log=typed_tool_log,
+    )
+    console.print(
+        f"  [green]✓ Reasoning complete:[/green] "
+        f"{len(reasoning_state.claims)} claims, "
+        f"confidence={reasoning_state.confidence_summary.overall if reasoning_state.confidence_summary else 'n/a'}, "
+        f"{len(reasoning_state.step_log)} steps logged"
+    )
+
+    # ── Task 4C: dynamic hypothesis generation (LLM) ────────────────────
+    try:
+        console.print(
+            "[bold cyan]► Hypothesis Generator:[/bold cyan] "
+            "Generating dynamic hypotheses…"
+        )
+        hypo_output = generate_dynamic_hypotheses(
+            provider=provider,
+            preview=preview,
+            evidence=evidence,
+            final_insights=best_insights.model_dump(),
+            unknowns=unknowns.model_dump(),
+            valid_citation_keys=reasoning_state.valid_citation_keys,
+            judge_output=best_judge.model_dump() if best_judge else None,
+            metadata=metadata,
+            tool_log=typed_tool_log,
+        )
+        reasoning_state = integrate_dynamic_hypotheses(
+            state=reasoning_state,
+            llm_output=hypo_output,
+            metadata=metadata,
+            unresolved_high_impact=unknowns.unresolved_high_impact,
+        )
+        console.print(
+            f"  [green]✓ Hypotheses:[/green] "
+            f"{len(reasoning_state.hypotheses)} hypotheses, "
+            f"{len(reasoning_state.hidden_questions)} hidden questions, "
+            f"{len(reasoning_state.step_log)} total steps"
+        )
+    except Exception as exc:
+        console.print(
+            f"  [yellow]⚠ Dynamic hypothesis generation skipped: {exc}[/yellow]"
+        )
+
     report = FinalReportSchema(
         provider=provider,
         model=model_name,
@@ -442,7 +519,7 @@ def run_agentic_insights(
         judge_after=judge_after,
         prior_analysis_report=analysis_report,
         tool_log=typed_tool_log,
-        reasoning_state=None,   # populated by Task 4B executor
+        reasoning_state=reasoning_state,
     )
 
     # Persist compact tool_log (large results are truncated)

@@ -565,3 +565,230 @@ def append_reasoning_step(
     return state.model_copy(
         update={"step_log": state.step_log + [new_step]}
     )
+
+
+# ── Task 4B — Deterministic Reasoning Engine Executor ─────────────────────────
+
+def _extract_claims_from_insights(
+    final_insights: dict,
+    unresolved_high_impact: list[str],
+) -> list[ClaimDraft]:
+    """
+    Build ``ClaimDraft`` objects from InsightSynthesisOutput dicts.
+
+    Sources (in order):
+      1. ``key_findings`` — each string becomes a claim.
+      2. ``risks_and_bias_signals`` — each becomes a low-confidence claim.
+      3. ``recommended_next_analyses`` — ranked analyses with evidence
+         citations (optional, only when ``evidence_citation`` is present).
+
+    Citation heuristic: if the finding text contains a token that looks
+    like an evidence path (``evidence.*``, ``preview.*``, ``tool_log[*]``)
+    we extract it; otherwise citations is left empty (validation will not
+    penalise a claim for *having no* citations — only for *invalid* ones).
+    """
+    claims: list[ClaimDraft] = []
+    _idx = 0
+
+    # Determine default confidence based on unresolved unknowns
+    default_conf: Literal["high", "medium", "low"] = (
+        "low" if unresolved_high_impact else "medium"
+    )
+
+    # 1. key_findings
+    for finding in final_insights.get("key_findings", []):
+        _idx += 1
+        cites = _extract_inline_citations(finding)
+        claims.append(ClaimDraft(
+            claim_id=f"c{_idx}",
+            text=finding,
+            citations=cites,
+            confidence=default_conf,
+        ))
+
+    # 2. risks_and_bias_signals (always low confidence)
+    for signal in final_insights.get("risks_and_bias_signals", []):
+        _idx += 1
+        cites = _extract_inline_citations(signal)
+        claims.append(ClaimDraft(
+            claim_id=f"c{_idx}",
+            text=signal,
+            citations=cites,
+            confidence="low",
+        ))
+
+    # 3. recommended_next_analyses (optional)
+    for analysis in final_insights.get("recommended_next_analyses", []):
+        if not isinstance(analysis, dict):
+            continue
+        cite_str = analysis.get("evidence_citation", "")
+        if not cite_str:
+            continue
+        _idx += 1
+        cites = _extract_inline_citations(cite_str)
+        claims.append(ClaimDraft(
+            claim_id=f"c{_idx}",
+            text=analysis.get("analysis", cite_str),
+            citations=cites,
+            confidence=default_conf,
+        ))
+
+    return claims
+
+
+_CITE_TOKEN_RE = re.compile(
+    r"(evidence\.[\w.]+|preview\.[\w.]+|tool_log\[\d+\])"
+)
+
+
+def _extract_inline_citations(text: str) -> list[str]:
+    """Pull citation-like tokens from free text."""
+    return list(dict.fromkeys(_CITE_TOKEN_RE.findall(text)))
+
+
+def run_reasoning_engine(
+    *,
+    run_id: str,
+    preview: dict,
+    evidence: dict,
+    final_insights: dict,
+    unknowns: dict,
+    metadata: MetadataInput | None = None,
+    analysis_report: str | None = None,
+    tool_log: list[ToolCallRecord] | None = None,
+) -> ReasoningState:
+    """
+    Task 4B deterministic reasoning-engine executor.
+
+    Runs entirely without LLM calls.  Consumes the outputs already
+    produced by the agentic pipeline (insights, unknowns, evidence,
+    preview) and applies rule-based validation logic from Task 4A.
+
+    Steps executed (each recorded in ``step_log``):
+        0. initialization — build valid citation keys
+        1. claim_extraction — derive ClaimDraft objects from insights
+        2. validation — run all deterministic validators
+        3. confidence_summary — aggregate confidence
+        4. stop_evaluation — set deterministic stop condition
+
+    Returns
+    -------
+    ReasoningState
+        Fully populated state ready for ``FinalReportSchema.reasoning_state``.
+    """
+
+    # ── 0. Initialization ────────────────────────────────────────────────
+    state = init_reasoning_state(
+        run_id=run_id,
+        preview=preview,
+        evidence=evidence,
+        tool_log=tool_log,
+    )
+
+    init_inputs = ["preview", "evidence"]
+    if tool_log:
+        init_inputs.append(f"tool_log({len(tool_log)} calls)")
+    if analysis_report:
+        init_inputs.append("analysis_report")
+
+    state = append_reasoning_step(
+        state,
+        step_type="evidence_scan",
+        inputs=init_inputs,
+        outputs=[f"{len(state.valid_citation_keys)} valid citation keys"],
+        notes="Reasoning engine initialised; citation key set built.",
+    )
+
+    # ── 1. Claim extraction ──────────────────────────────────────────────
+    unresolved = unknowns.get("unresolved_high_impact", [])
+
+    claims = _extract_claims_from_insights(final_insights, unresolved)
+
+    state = state.model_copy(update={"claims": claims})
+    state = append_reasoning_step(
+        state,
+        step_type="claim_draft",
+        inputs=["final_insights.key_findings",
+                "final_insights.risks_and_bias_signals"],
+        outputs=[c.claim_id for c in claims],
+        notes=f"Extracted {len(claims)} candidate claim(s) from insights.",
+    )
+
+    # ── 2. Validation ────────────────────────────────────────────────────
+    validated_claims = validate_all_claims(
+        claims=claims,
+        valid_citation_keys=state.valid_citation_keys,
+        metadata=metadata,
+        unresolved_high_impact=unresolved,
+    )
+    state = state.model_copy(update={"claims": validated_claims})
+
+    n_valid = sum(1 for c in validated_claims if c.validation_status == "valid")
+    n_flagged = sum(1 for c in validated_claims if c.validation_status == "flagged")
+    n_rejected = sum(1 for c in validated_claims if c.validation_status == "rejected")
+
+    state = append_reasoning_step(
+        state,
+        step_type="validation",
+        inputs=[c.claim_id for c in validated_claims],
+        outputs=[
+            f"valid={n_valid}",
+            f"flagged={n_flagged}",
+            f"rejected={n_rejected}",
+        ],
+        notes=(
+            f"Deterministic validation complete: {n_valid} valid, "
+            f"{n_flagged} flagged, {n_rejected} rejected."
+        ),
+    )
+
+    # ── 3. Confidence summary ────────────────────────────────────────────
+    confidence = compute_confidence_summary(
+        claims=validated_claims,
+        unresolved_high_impact=unresolved,
+        metadata=metadata,
+    )
+    state = state.model_copy(update={"confidence_summary": confidence})
+
+    state = append_reasoning_step(
+        state,
+        step_type="stop_evaluation",
+        inputs=["validated_claims", "unresolved_high_impact"],
+        outputs=[f"overall_confidence={confidence.overall}"],
+        notes=(
+            f"Confidence summary: {confidence.overall}. "
+            f"Limiting factors: {'; '.join(confidence.limiting_factors) or 'none'}."
+        ),
+    )
+
+    # ── 4. Stop condition ────────────────────────────────────────────────
+    stop_reason_parts: list[str] = [
+        f"{len(validated_claims)} claim(s) validated",
+        f"confidence={confidence.overall}",
+    ]
+    if n_rejected:
+        stop_reason_parts.append(f"{n_rejected} rejected")
+    if unresolved:
+        stop_reason_parts.append(
+            f"{len(unresolved)} high-impact unknown(s) unresolved"
+        )
+
+    state = state.model_copy(
+        update={
+            "stop_condition": StopCondition(
+                met=True,
+                reason="Deterministic reasoning complete: "
+                       + "; ".join(stop_reason_parts) + ".",
+            ),
+        }
+    )
+
+    state = append_reasoning_step(
+        state,
+        step_type="stop_evaluation",
+        inputs=["confidence_summary"],
+        outputs=["stop_condition.met=True"],
+        notes="Reasoning loop terminated (deterministic single pass).",
+    )
+
+    return state

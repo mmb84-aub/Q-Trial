@@ -23,6 +23,11 @@ from qtrial_backend.agentic.schemas import (
     ReasoningAction,
     ReasoningActionType,
     ReasoningStepType,
+    # Task 4C schemas
+    FalsificationCheck,
+    HiddenQuestion,
+    LLMHypothesis,
+    HypothesisGenerationOutput,
 )
 from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.orchestrator import run_agentic_insights
@@ -37,7 +42,12 @@ from qtrial_backend.agentic.reasoning import (
     compute_confidence_summary,
     init_reasoning_state,
     append_reasoning_step,
+    run_reasoning_engine,
     ValidationResult,
+)
+from qtrial_backend.agentic.hypothesis_gen import (
+    generate_dynamic_hypotheses,
+    integrate_dynamic_hypotheses,
 )
 
 __all__ = [
@@ -78,6 +88,14 @@ __all__ = [
     "compute_confidence_summary",
     "init_reasoning_state",
     "append_reasoning_step",
+    "run_reasoning_engine",
+    # Task 4C
+    "FalsificationCheck",
+    "HiddenQuestion",
+    "LLMHypothesis",
+    "HypothesisGenerationOutput",
+    "generate_dynamic_hypotheses",
+    "integrate_dynamic_hypotheses",
     # pipeline runners
     "run_judge_agent",
     "run_agentic_insights",
