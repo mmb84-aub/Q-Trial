@@ -209,6 +209,227 @@ class MetadataInput(BaseModel):
     )
 
 
+# ── Upstream tool-call record (from AgentLoop / static pipeline) ──────────────
+
+class ToolCallRecord(BaseModel):
+    """
+    A single tool call made by the upstream statistical AgentLoop.
+    Mirrors the structure of AgentLoop.tool_log entries but typed and
+    extended with a stable citation_alias set by the orchestrator.
+    """
+
+    tool_name: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    result: Any = Field(
+        default=None,
+        description="Raw tool result (dict/list/scalar). May be truncated.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Error message when the tool call failed.",
+    )
+    citation_alias: str = Field(
+        default="",
+        description=(
+            "Stable indexed alias assigned by the orchestrator, "
+            "e.g. 'tool_log[0]'.  Agents and Judge cite via this alias."
+        ),
+    )
+
+
+# ── Task 4A — Reasoning State schemas ────────────────────────────────────────
+
+class EvidenceSupportEntry(BaseModel):
+    """One piece of evidence that supports or contradicts a hypothesis."""
+
+    citation_key: str = Field(
+        ...,
+        description=(
+            "Resolvable path: 'evidence.*', 'preview.*', or "
+            "'tool_log[i]' alias."
+        ),
+    )
+    raw_value: Any = Field(
+        default=None,
+        description="The numeric/dict value pulled from evidence for this key.",
+    )
+    supports_claim: bool = Field(
+        ...,
+        description="True when the evidence supports the parent claim/hypothesis.",
+    )
+    explanation: str = Field(
+        ...,
+        description="One sentence linking the numeric value to the claim.",
+    )
+
+
+class CandidateHypothesis(BaseModel):
+    """A single candidate explanatory or analytic hypothesis."""
+
+    hypothesis_id: str = Field(
+        ..., description="Stable slug, e.g. 'h1', 'h2'."
+    )
+    statement: str
+    source_agent: AgentName = Field(
+        ..., description="Agent that produced this hypothesis."
+    )
+    confidence: Literal["high", "medium", "low"]
+    evidence_support: list[EvidenceSupportEntry] = Field(default_factory=list)
+    contradictions: list[str] = Field(
+        default_factory=list,
+        description="Citation keys that contradict this hypothesis.",
+    )
+    status: Literal[
+        "candidate", "supported", "contradicted", "deferred", "dropped"
+    ] = "candidate"
+
+
+class ClaimDraft(BaseModel):
+    """A claim drafted during the reasoning loop, pending deterministic validation."""
+
+    claim_id: str = Field(..., description="Stable slug, e.g. 'c1', 'c2'.")
+    text: str
+    hypothesis_ids: list[str] = Field(
+        default_factory=list,
+        description="Hypothesis IDs this claim builds on.",
+    )
+    citations: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Resolvable citation keys used inline in `text`.  "
+            "Validated deterministically against valid_citation_keys."
+        ),
+    )
+    confidence: Literal["high", "medium", "low"]
+    validation_status: Literal[
+        "pending", "valid", "flagged", "rejected"
+    ] = "pending"
+    flag_reasons: list[str] = Field(
+        default_factory=list,
+        description="Populated by deterministic validators, NOT by the LLM.",
+    )
+
+
+class Contradiction(BaseModel):
+    """A tracked contradiction between two hypotheses."""
+
+    hypothesis_id_a: str
+    hypothesis_id_b: str
+    description: str
+    severity: Literal["high", "medium", "low"]
+    resolved: bool = False
+    resolution_note: str | None = None
+
+
+ReasoningStepType = Literal[
+    "evidence_scan",
+    "hypothesis_gen",
+    "claim_draft",
+    "validation",
+    "contradiction_check",
+    "refinement",
+    "stop_evaluation",
+]
+
+
+class ReasoningStepLog(BaseModel):
+    """One recorded step in the reasoning trace."""
+
+    step_index: int = Field(..., ge=0)
+    step_type: ReasoningStepType
+    inputs: list[str] = Field(
+        default_factory=list,
+        description="Keys, IDs, or labels consumed by this step.",
+    )
+    outputs: list[str] = Field(
+        default_factory=list,
+        description="Keys, IDs, or labels produced by this step.",
+    )
+    notes: str = ""
+
+
+class StopCondition(BaseModel):
+    """Whether the reasoning loop is complete and why."""
+
+    met: bool
+    reason: str = ""
+    blocking_issues: list[str] = Field(
+        default_factory=list,
+        description="Issues that prevent stopping when met=False.",
+    )
+
+
+class ConfidenceSummary(BaseModel):
+    """Aggregate confidence assessment computed deterministically."""
+
+    overall: Literal["high", "medium", "low", "inconclusive"]
+    num_supported_claims: int = Field(..., ge=0)
+    num_flagged_claims: int = Field(..., ge=0)
+    num_rejected_claims: int = Field(..., ge=0)
+    limiting_factors: list[str] = Field(
+        default_factory=list,
+        description="Reasons why overall confidence is capped.",
+    )
+
+
+class ReasoningState(BaseModel):
+    """
+    Full structured reasoning state for one pipeline run.
+    Persisted under FinalReportSchema.reasoning_state.
+    All lists default to empty so early-stage runs can be serialised
+    without requiring downstream state to be populated.
+    """
+
+    run_id: str = Field(
+        default="",
+        description="Echoes provider+timestamp for traceability.",
+    )
+    hypotheses: list[CandidateHypothesis] = Field(default_factory=list)
+    claims: list[ClaimDraft] = Field(default_factory=list)
+    contradictions: list[Contradiction] = Field(default_factory=list)
+    step_log: list[ReasoningStepLog] = Field(default_factory=list)
+    stop_condition: StopCondition = Field(
+        default_factory=lambda: StopCondition(met=False, reason="not started"),
+    )
+    confidence_summary: ConfidenceSummary | None = None
+    valid_citation_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Built at initialisation time from preview + evidence + tool_log. "
+            "Used by deterministic claim validators."
+        ),
+    )
+
+
+# ── ReasoningAction (used by Task 4B executor) ────────────────────────────────
+
+ReasoningActionType = Literal[
+    "scan_evidence",
+    "generate_hypothesis",
+    "draft_claim",
+    "validate_claims",
+    "check_contradictions",
+    "refine_claims",
+    "evaluate_stop",
+    "finalize",
+]
+
+
+class ReasoningAction(BaseModel):
+    """
+    A single action produced by the reasoning executor (Task 4B).
+    Defined here so it can be persisted in outputs and referenced by
+    forward-looking integration points added in Task 4A.
+    """
+
+    action_type: ReasoningActionType
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    expected_output_keys: list[str] = Field(default_factory=list)
+    status: Literal["pending", "running", "done", "failed"] = "pending"
+    result: dict[str, Any] | None = None
+    error_message: str | None = None
+
+
 # ── Final Report ──────────────────────────────────────────────────────────────
 
 class AgentRunRecord(BaseModel):
@@ -232,3 +453,26 @@ class FinalReportSchema(BaseModel):
     final_insights_after: InsightSynthesisOutput | None = None
     judge_before: JudgeOutput | None = None
     judge_after: JudgeOutput | None = None
+    # Upstream statistical context — None when not wired from AgentLoop
+    prior_analysis_report: str | None = Field(
+        default=None,
+        description=(
+            "Markdown report from the upstream statistical AgentLoop. "
+            "Propagated as PRIOR_ANALYSIS_REPORT to all reasoning agents."
+        ),
+    )
+    tool_log: list[ToolCallRecord] | None = Field(
+        default=None,
+        description=(
+            "Typed tool-call log from the upstream AgentLoop, with stable "
+            "citation aliases (tool_log[i]) set by the orchestrator."
+        ),
+    )
+    # Task 4A — structured reasoning state (None until 4B executor is wired)
+    reasoning_state: ReasoningState | None = Field(
+        default=None,
+        description=(
+            "Structured reasoning state produced by the Task 4A/4B reasoning "
+            "engine.  None in runs that predate Task 4B wiring."
+        ),
+    )

@@ -14,11 +14,14 @@ from qtrial_backend.agentic.agents import (
 )
 from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.planner import call_planner
+from typing import Any
+
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
     FinalReportSchema,
     InsightSynthesisOutput,
     MetadataInput,
+    ToolCallRecord,
     UnknownsOutput,
 )
 from qtrial_backend.core.router import get_client
@@ -30,6 +33,67 @@ console = Console()
 
 OUTPUT_DIR = Path("outputs")
 OUTPUT_FILE = OUTPUT_DIR / "agentic_run.json"
+
+
+# ── Tool-log coerce / compact helpers ────────────────────────────────────────
+
+def _coerce_tool_log(
+    raw_tool_log: list[dict[str, Any]] | None,
+) -> list[ToolCallRecord] | None:
+    """
+    Convert a raw tool_log list (as produced by AgentLoop) into typed
+    ``ToolCallRecord`` objects with stable ``citation_alias`` values.
+
+    AgentLoop.tool_log entries have keys: tool, args, result, [error].
+    Returns None when input is None or empty.
+    """
+    if not raw_tool_log:
+        return None
+
+    records: list[ToolCallRecord] = []
+    for i, entry in enumerate(raw_tool_log):
+        records.append(
+            ToolCallRecord(
+                tool_name=entry.get("tool", entry.get("tool_name", "unknown")),
+                args=entry.get("args", {}),
+                result=entry.get("result"),
+                error=entry.get("error"),
+                citation_alias=f"tool_log[{i}]",
+            )
+        )
+    return records or None
+
+
+def _compact_tool_log_for_persistence(
+    records: list[ToolCallRecord] | None,
+) -> list[dict[str, Any]] | None:
+    """
+    Produce a compact JSON-serialisable list for outputs/agentic_run.json.
+    Result strings are truncated to 2000 chars to keep the file manageable.
+    """
+    if not records:
+        return None
+
+    MAX_RESULT_CHARS = 2_000
+    out: list[dict[str, Any]] = []
+    for rec in records:
+        result_repr: Any = rec.result
+        if isinstance(result_repr, str) and len(result_repr) > MAX_RESULT_CHARS:
+            result_repr = result_repr[:MAX_RESULT_CHARS] + "\u2026(truncated)"
+        elif isinstance(result_repr, (dict, list)):
+            result_str = json.dumps(result_repr, default=str)
+            if len(result_str) > MAX_RESULT_CHARS:
+                result_repr = result_str[:MAX_RESULT_CHARS] + "\u2026(truncated)"
+        entry: dict[str, Any] = {
+            "citation_alias": rec.citation_alias,
+            "tool_name": rec.tool_name,
+            "args": rec.args,
+            "result": result_repr,
+        }
+        if rec.error:
+            entry["error"] = rec.error
+        out.append(entry)
+    return out
 
 
 # ── Metadata helpers ──────────────────────────────────────────────────────────
@@ -137,9 +201,29 @@ def run_agentic_insights(
     max_cols: int = 30,
     run_judge: bool = True,
     metadata: MetadataInput | None = None,
+    # ── upstream statistical context (both default to None — backward compat) ──
+    analysis_report: str | None = None,
+    tool_log: list[dict[str, Any]] | None = None,
 ) -> FinalReportSchema:
+    """
+    Run the full agentic reasoning pipeline.
+
+    Parameters
+    ----------
+    analysis_report : str | None
+        Optional Markdown report produced by the upstream statistical
+        AgentLoop.  Propagated as PRIOR_ANALYSIS_REPORT to all reasoning
+        agents when agents.py is updated in Task 4A follow-on.
+    tool_log : list[dict] | None
+        Optional raw tool-call log from AgentLoop.  Each entry must have
+        keys: tool (or tool_name), args, result, [error].  Coerced to
+        typed ToolCallRecord objects with stable citation aliases.
+    """
 
     OUTPUT_DIR.mkdir(exist_ok=True)
+
+    # Coerce raw tool_log dicts → typed ToolCallRecord list with aliases
+    typed_tool_log: list[ToolCallRecord] | None = _coerce_tool_log(tool_log)
 
     # ── Step i: build preview + evidence ─────────────────────────────────────
     console.print("[bold cyan]► Step 1/5:[/bold cyan] Building dataset preview…")
@@ -152,6 +236,13 @@ def run_agentic_insights(
     # Attach metadata as a top-level evidence key so all agents see it
     if metadata is not None:
         evidence["__user_metadata__"] = metadata.model_dump(exclude_none=True)
+
+    # Attach upstream context markers so planner/evidence are aware
+    if analysis_report is not None:
+        evidence["__prior_analysis_available__"] = True
+    if typed_tool_log is not None:
+        evidence["__tool_log_n_calls__"] = len(typed_tool_log)
+        evidence["__tool_log_tools__"] = [r.tool_name for r in typed_tool_log]
 
     # ── Step ii: planner — returns plan with synthesis guaranteed last ────────
     console.print("[bold cyan]► Step 3/5:[/bold cyan] Calling Planner (LLM)…")
@@ -349,10 +440,18 @@ def run_agentic_insights(
         final_insights_after=insights_after,
         judge_before=judge_output if metadata is not None else None,
         judge_after=judge_after,
+        prior_analysis_report=analysis_report,
+        tool_log=typed_tool_log,
+        reasoning_state=None,   # populated by Task 4B executor
     )
 
+    # Persist compact tool_log (large results are truncated)
+    report_dict = report.model_dump()
+    if typed_tool_log is not None:
+        report_dict["tool_log"] = _compact_tool_log_for_persistence(typed_tool_log)
+
     OUTPUT_FILE.write_text(
-        json.dumps(report.model_dump(), indent=2, ensure_ascii=False),
+        json.dumps(report_dict, indent=2, ensure_ascii=False, default=str),
         encoding="utf-8",
     )
     console.print(f"[bold green]✔ Saved →[/bold green] {OUTPUT_FILE}")
