@@ -126,8 +126,8 @@ class RankedUnknown(BaseModel):
     rank: int
     question: str
     category: Literal[
-        "protocol", "endpoint_definition", "data_provenance",
-        "statistical_plan", "population", "regulatory", "other"
+        "clinical_context", "treatment", "comorbidities", "follow_up",
+        "confounding", "mechanism", "population", "outcome_ascertainment", "other"
     ]
     impact: Literal["high", "medium", "low"]
     rationale: str

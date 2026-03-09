@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _parse_keys(raw: str | None) -> list[str]:
+    """Split a comma-separated key string into a clean list."""
+    if not raw:
+        return []
+    return [k.strip() for k in raw.split(",") if k.strip()]
 
 
 @dataclass(frozen=True)
@@ -21,6 +28,11 @@ class Settings:
     # Literature / RAG
     ncbi_api_key: str | None = os.getenv("NCBI_API_KEY")
     s2_api_key: str | None = os.getenv("S2_API_KEY")
+
+    @property
+    def gemini_api_keys(self) -> list[str]:
+        """All Gemini API keys (supports comma-separated list in GEMINI_API_KEY)."""
+        return _parse_keys(self.gemini_api_key)
 
 
 settings = Settings()

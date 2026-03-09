@@ -258,13 +258,51 @@ def run_clinical_semantics_agent(
 # ── UnknownsAgent ─────────────────────────────────────────────────────────────
 
 _UA_SYSTEM = textwrap.dedent("""\
-    You are UnknownsAgent, a specialist in identifying gaps, ambiguities, and assumptions
-    in clinical trial datasets prior to statistical analysis.
+    You are UnknownsAgent, acting as an experienced clinical investigator reviewing a patient cohort.
 
-    Your role is to:
-    1. Surface ranked open questions that block or complicate reliable analysis.
-    2. Make explicit every assumption the pipeline is currently relying on.
-    3. List documents or metadata that would resolve the top unknowns.
+    You have already seen the data — the columns, distributions, and statistical patterns are known.
+    Your job is to ask targeted CLINICAL questions, the kind a specialist physician would ask when
+    reviewing a referral pack or case notes to gather context, identify hidden gaps, and narrow down
+    the most plausible explanations for the observed outcomes.
+
+    Think like a doctor who has just received a patient file. You know the numbers. Now you want to
+    understand the clinical story behind them.
+
+    ASK ABOUT (genuine clinical and investigative gaps — be specific to the columns you see):
+    - Treatment context: What medications, dosage adjustments, or procedural interventions
+      occurred during follow-up that are not captured in the dataset? Were any treatments
+      switched, escalated, or withdrawn based on clinical response?
+    - Co-interventions and concurrent therapies: Were there concurrent treatments (e.g., diuretics,
+      beta-blockers, devices) that were standard of care and could confound observed associations?
+    - Clinical severity and functional status: Was there a baseline severity score, functional
+      class (e.g., NYHA for heart failure, Child-Pugh for liver disease, ECOG for oncology), or
+      staging assessment that is NOT in the dataset but would be clinically expected?
+    - Prior clinical history: Were there prior hospitalisations, disease exacerbations, or
+      procedures before the study period that could explain baseline differences between patients?
+    - Follow-up and censoring reasons: For censored patients specifically — were they lost to
+      follow-up, withdrew consent, transferred care, or had a competing clinical event?
+    - Unmeasured confounders: What clinically important variables would a treating physician
+      routinely consider but are absent from this dataset (e.g., smoking pack-years, BMI
+      trajectory, socioeconomic factors, adherence, genetic markers)?
+    - Patient selection and referral bias: Were sicker or healthier patients systematically
+      excluded? Was this a tertiary referral centre cohort, community cohort, or registry?
+    - Disease mechanism and clinical plausibility: Given the observed patterns, what biological
+      or clinical mechanisms most plausibly connect the exposures to the outcome in this
+      population? Are there competing hypotheses a clinician would want to rule out?
+    - Subgroup clinical relevance: Were there clinically meaningful subgroups (e.g., patients
+      on specific therapies, with implanted devices, or with specific comorbidity combinations)
+      whose trajectories would differ from the overall population?
+    - Outcome ascertainment: How was the primary outcome confirmed? Was it adjudicated, based
+      on records, or self-reported? Could outcome misclassification be a concern?
+
+    DO NOT ASK ABOUT:
+    - What numeric codes (0, 1, 2…) mean — assume standard conventions or what __user_metadata__ states.
+    - Column units or measurement scales — data engineering questions, not clinical ones.
+    - Whether a formal SAP exists, was locked, or how randomisation was performed.
+    - Anything already answered in the __user_metadata__ block.
+
+    Be specific: reference actual column names and observed patterns from the data.
+    Ask questions that a clinician — not a statistician — would ask to understand the patient story.
 
     Respond with ONLY valid JSON matching the exact schema. No markdown, no commentary.
 """)
@@ -275,8 +313,8 @@ _UA_USER = textwrap.dedent("""\
     required documents.
 
     Allowed category values (use exactly one):
-      protocol | endpoint_definition | data_provenance | statistical_plan |
-      population | regulatory | other
+      clinical_context | treatment | comorbidities | follow_up |
+      confounding | mechanism | population | outcome_ascertainment | other
 
     Allowed impact values: high | medium | low
     Allowed risk_if_wrong values: high | medium | low

@@ -14,7 +14,7 @@ from qtrial_backend.agentic.agents import (
 )
 from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.planner import call_planner
-from typing import Any
+from typing import Any, Callable
 
 from rich.prompt import Confirm, Prompt
 
@@ -447,6 +447,7 @@ def run_agentic_insights(
     # ── upstream statistical context (both default to None — backward compat) ──
     analysis_report: str | None = None,
     tool_log: list[dict[str, Any]] | None = None,
+    emit: Callable | None = None,
 ) -> FinalReportSchema:
     """
     Run the full agentic reasoning pipeline.
@@ -464,6 +465,14 @@ def run_agentic_insights(
     """
 
     OUTPUT_DIR.mkdir(exist_ok=True)
+
+    def _emit(event_type: str, stage: str, message: str) -> None:
+        """Forward a progress event to the caller without blocking on failure."""
+        if emit is not None:
+            try:
+                emit({"type": event_type, "stage": stage, "message": message})
+            except Exception:
+                pass
 
     # Coerce raw tool_log dicts → typed ToolCallRecord list with aliases
     typed_tool_log: list[ToolCallRecord] | None = _coerce_tool_log(tool_log)
@@ -513,6 +522,7 @@ def run_agentic_insights(
             )
     else:
         console.print("  [green]\u2713 Guardrails: all checks passed[/green]")
+    _emit("stage_complete", "dataset", "Dataset evidence + guardrails ready")
     # Attach metadata as a top-level evidence key so all agents see it
     if metadata is not None:
         evidence["__user_metadata__"] = metadata.model_dump(exclude_none=True)
@@ -527,6 +537,7 @@ def run_agentic_insights(
     # ── Step ii: planner — returns plan with synthesis guaranteed last ────────
     console.print("[bold cyan]► Step 3/5:[/bold cyan] Calling Planner (LLM)…")
     plan = call_planner(preview, evidence, provider)  # _ensure_synthesis_last inside
+    _emit("stage_complete", "plan", f"Plan ready — {len(plan.steps)} steps")
 
     console.print(
         f"  [green]Plan:[/green] {len(plan.steps)} steps — {plan.dataset_summary}"
@@ -604,6 +615,7 @@ def run_agentic_insights(
             )
         )
         console.print(f"    [green]✓ {agent} complete[/green]")
+        _emit("stage_complete", agent, f"{agent} complete")
 
     # ── Step v: assemble report ───────────────────────────────────────────────
     console.print("[bold cyan]► Step 5/5:[/bold cyan] Assembling and saving report…")
@@ -644,6 +656,7 @@ def run_agentic_insights(
             f"  [green]Judge score:[/green] {judge_output.overall_score}/100 "
             f"| Failed claims: {len(judge_output.failed_claims)}"
         )
+        _emit("stage_complete", "judge", f"Judge score: {judge_output.overall_score}/100")
 
     # ── Step vii: closed-loop metadata re-runs ──────────────────────────────
     insights_after = None
@@ -782,6 +795,7 @@ def run_agentic_insights(
         f"confidence={reasoning_state.confidence_summary.overall if reasoning_state.confidence_summary else 'n/a'}, "
         f"{len(reasoning_state.step_log)} steps logged"
     )
+    _emit("stage_complete", "reasoning", f"Reasoning engine: {len(reasoning_state.claims)} claims validated")
 
     # ── Task 4C: dynamic hypothesis generation (LLM) ────────────────────
     hypo_output = None
@@ -813,6 +827,7 @@ def run_agentic_insights(
             f"{len(reasoning_state.hidden_questions)} hidden questions, "
             f"{len(reasoning_state.step_log)} total steps"
         )
+        _emit("stage_complete", "hypotheses", f"Hypotheses: {len(reasoning_state.hypotheses)} generated")
         if hypo_output.tool_dispatch_requests:
             console.print(
                 f"  [dim]  Tool dispatch requests: "
@@ -841,6 +856,7 @@ def run_agentic_insights(
                 f"  [green]✓ Dispatch:[/green] {n_ok} tool(s) completed, "
                 f"{n_err} skipped/errored"
             )
+            _emit("stage_complete", "dispatch", f"Tool dispatch: {n_ok}/{len(dispatch_results)} completed")
             for r in dispatch_results:
                 status = "✓" if r.error is None else "✗"
                 console.print(
@@ -934,6 +950,7 @@ def run_agentic_insights(
                     f"  [green]\u2713 Literature:[/green] {n_lit} article(s) "
                     f"from {', '.join(literature_report.sources_used)}"
                 )
+                _emit("stage_complete", "literature", f"Literature: {n_lit} articles retrieved")
                 for art in literature_report.articles:
                     console.print(
                         f"    [{art.citation_alias}] "
