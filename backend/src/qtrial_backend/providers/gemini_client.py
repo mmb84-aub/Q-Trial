@@ -78,11 +78,17 @@ class GeminiClient(LLMClient):
             except Exception as exc:
                 err_str = str(exc)
                 is_rate_limit = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
-                if is_rate_limit and attempt < self._MAX_RETRIES:
-                    match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str)
-                    wait = float(match.group(1)) if match else self._DEFAULT_WAIT
+                is_server_error = "ServerError" in type(exc).__name__ or "500" in err_str or "503" in err_str
+                if (is_rate_limit or is_server_error) and attempt < self._MAX_RETRIES:
+                    if is_rate_limit:
+                        match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str)
+                        wait = float(match.group(1)) if match else self._DEFAULT_WAIT
+                        reason = "Rate limit hit"
+                    else:
+                        wait = min(5.0 * (attempt + 1), 30.0)  # 5s, 10s, 15s back-off
+                        reason = "Server error (5xx)"
                     print(
-                        f"[Gemini] Rate limit hit. "
+                        f"[Gemini] {reason}. "
                         f"Waiting {wait:.0f}s before retry "
                         f"({attempt + 1}/{self._MAX_RETRIES})..."
                     )

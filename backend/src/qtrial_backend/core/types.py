@@ -5,7 +5,7 @@ from typing import Literal, Any, Dict
 
 from pydantic import BaseModel, Field
 
-ProviderName = Literal["openai", "gemini", "claude"]
+ProviderName = Literal["openai", "gemini", "claude", "openrouter"]
 
 
 # ── Legacy single-shot types (unchanged) ──────────────────────────────
