@@ -31,5 +31,4 @@ class Settings:
     max_agent_iterations: int = int(os.getenv("MAX_AGENT_ITERATIONS", "25"))
     max_tool_result_chars: int = int(os.getenv("MAX_TOOL_RESULT_CHARS", "4000"))
 
-
 settings = Settings()
