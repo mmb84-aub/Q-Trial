@@ -78,6 +78,11 @@ LITERATURE
   citation_manager(action, paper_id?, title?, authors?, year?, key_finding?)
       → action='register' | 'list' | 'check'; enforces traceable references
 
+RETRIEVAL
+  retrieve_evidence(query, top_k?, min_score?, source_types?, metadata_filters?, snippet_chars?)
+      → ranked evidence chunks from indexed sources (data dictionary, analyst notes,
+        evidence files, and prior tool outputs) with provenance
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ANALYSIS WORKFLOW
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -128,6 +133,11 @@ terms derived from Step 0 context. Then:
 2. For every paper you will cite, call citation_manager(action='register'). \
 3. In the final report, only cite papers that are registered.
 
+### Step 6 — Evidence Grounding Check (before final write-up)
+Before writing conclusions, use retrieve_evidence on your key claims \
+(effect sizes, survival comparisons, and recommendations) to pull the most \
+relevant indexed evidence snippets and verify your narrative is grounded.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -142,6 +152,9 @@ hypothesis_test, pairwise_group_test, or regression.
 - NEVER fabricate a reference. A paper may only appear in the report \
 if its ID is registered in citation_manager. If you cannot find a \
 real paper matching a claim, omit the citation.
+- Use retrieve_evidence when you need to recall previously indexed evidence \
+(data dictionary definitions, analyst notes, and prior tool outputs) instead \
+of relying on memory across long tool-call sequences.
 - If the dataset does not appear to be a clinical trial, adapt the \
 workflow accordingly — skip baseline_balance, reconsider survival tools.
 - Make multiple tool calls; do not guess from limited data.

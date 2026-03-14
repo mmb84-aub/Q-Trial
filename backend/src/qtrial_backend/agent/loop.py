@@ -147,6 +147,19 @@ class AgentLoop:
                     messages.append(
                         Message(role="tool", tool_result=tool_result)
                     )
+
+                    if not tool_result.is_error and tc.name != "retrieve_evidence":
+                        try:
+                            context.index_tool_result(
+                                tool_name=tc.name,
+                                arguments=tc.arguments,
+                                result_text=tool_result.content,
+                                is_error=False,
+                            )
+                        except Exception:
+                            # Retrieval indexing failures must never block analysis flow.
+                            pass
+
                     tool_log.append(
                         {
                             "iteration": iterations,
