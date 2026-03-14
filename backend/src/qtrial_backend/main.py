@@ -64,6 +64,16 @@ def analyze(
         "-d",
         help="Path to JSON file mapping column names to plain-English descriptions",
     ),
+    evidence_file: list[str] = typer.Option(
+        None,
+        "--evidence-file",
+        help="Optional evidence file path(s) to index for retrieval (repeat flag)",
+    ),
+    evidence_text: str = typer.Option(
+        None,
+        "--evidence-text",
+        help="Optional analyst note text to index for retrieval",
+    ),
 ):
     """
     Agentic analysis: LLM iteratively explores the dataset using statistical
@@ -94,6 +104,24 @@ def analyze(
         for col, desc in col_descs.items():
             lines.append(f"  {col}: {desc}")
         column_desc_block = "\n".join(lines) + "\n"
+        context.ingest_data_dictionary(data_dictionary, reindex=True)
+
+    if evidence_text:
+        context.ingest_evidence_text(
+            text=evidence_text,
+            name=f"analyst_note:{dataset_name}",
+            source_type="user_input",
+            metadata={"dataset_name": dataset_name},
+            reindex=True,
+        )
+
+    for ev_file in evidence_file or []:
+        context.ingest_evidence_file(
+            path=ev_file,
+            source_type="file",
+            metadata={"dataset_name": dataset_name},
+            reindex=True,
+        )
 
     # 3. Build initial message with schema and brief preview
     preview = build_dataset_preview(df, max_rows=5, max_cols=30)
@@ -117,6 +145,8 @@ def analyze(
             f"[bold]Shape:[/bold] {context.shape[0]} rows x {context.shape[1]} cols\n"
             f"[bold]Provider:[/bold] {provider}\n"
             f"[bold]Tools available:[/bold] {len(all_tools)}\n"
+            f"[bold]Evidence docs indexed:[/bold] {context.evidence_store.document_count}\n"
+            f"[bold]Evidence chunks indexed:[/bold] {context.evidence_store.chunk_count}\n"
             f"[bold]Max iterations:[/bold] {max_iterations}",
             title="Agent Configuration",
         )
@@ -178,6 +208,22 @@ def report(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show tool call details (dynamic mode only)"
     ),
+    data_dictionary: str = typer.Option(
+        None,
+        "--data-dictionary",
+        "-d",
+        help="Optional JSON data dictionary to inject and index (dynamic mode)",
+    ),
+    evidence_file: list[str] = typer.Option(
+        None,
+        "--evidence-file",
+        help="Optional evidence file path(s) to index (dynamic mode, repeat flag)",
+    ),
+    evidence_text: str = typer.Option(
+        None,
+        "--evidence-text",
+        help="Optional analyst note text to index (dynamic mode)",
+    ),
 ):
     """
     Generate a report from a dataset.
@@ -226,6 +272,34 @@ def report(
         import qtrial_backend.tools  # noqa: F401
 
         context = AgentContext(dataframe=df, dataset_name=dataset_name)
+
+        column_desc_block = ""
+        if data_dictionary:
+            with open(data_dictionary, "r", encoding="utf-8") as fh:
+                col_descs: dict[str, str] = json.load(fh)
+            lines = ["\nColumn descriptions (authoritative — do not infer meaning from names alone):"]
+            for col, desc in col_descs.items():
+                lines.append(f"  {col}: {desc}")
+            column_desc_block = "\n".join(lines) + "\n"
+            context.ingest_data_dictionary(data_dictionary, reindex=True)
+
+        if evidence_text:
+            context.ingest_evidence_text(
+                text=evidence_text,
+                name=f"analyst_note:{dataset_name}",
+                source_type="user_input",
+                metadata={"dataset_name": dataset_name},
+                reindex=True,
+            )
+
+        for ev_file in evidence_file or []:
+            context.ingest_evidence_file(
+                path=ev_file,
+                source_type="file",
+                metadata={"dataset_name": dataset_name},
+                reindex=True,
+            )
+
         preview = build_dataset_preview(df, max_rows=5, max_cols=30)
         schema = {c: str(df[c].dtype) for c in df.columns}
         initial_msg = INITIAL_USER_MESSAGE_TEMPLATE.format(
@@ -233,6 +307,7 @@ def report(
             rows=context.shape[0],
             cols=context.shape[1],
             schema=json.dumps(schema, indent=2),
+            column_descriptions=column_desc_block,
             preview_json=json.dumps(preview["head"][:5], indent=2, default=str),
         )
 
@@ -245,6 +320,8 @@ def report(
                 f"[bold]Shape:[/bold] {context.shape[0]} rows × {context.shape[1]} cols\n"
                 f"[bold]Provider:[/bold] {provider}\n"
                 f"[bold]Tools:[/bold] {len(all_tools)}\n"
+                f"[bold]Evidence docs indexed:[/bold] {context.evidence_store.document_count}\n"
+                f"[bold]Evidence chunks indexed:[/bold] {context.evidence_store.chunk_count}\n"
                 f"[bold]Max iterations:[/bold] {max_iterations}",
                 title="Dynamic Report",
             )
