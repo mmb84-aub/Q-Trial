@@ -45,6 +45,56 @@ class DataQualityOutput(BaseModel):
     summary: str
 
 
+# ── Task 5 — Robustness Guardrails ───────────────────────────────────────────
+
+GuardrailCheckType = Literal[
+    "low_cardinality_numeric",
+    "range_violation",
+    "unit_plausibility",
+    "repeated_measures",
+]
+
+
+class GuardrailFlag(BaseModel):
+    """
+    A single robustness flag produced by the deterministic guardrail checks.
+    Attached to evidence as ``guardrails[i]`` citations.
+    """
+    check_type: GuardrailCheckType
+    column: str | None = None
+    severity: Literal["high", "medium", "low"]
+    detail: str
+    suggested_action: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepeatedMeasuresSchema(BaseModel):
+    """Schema details when a repeated-measures / longitudinal design is inferred."""
+    id_column: str
+    n_subjects: int
+    total_rows: int
+    max_repeats_per_subject: int
+    n_subjects_with_repeats: int
+    likely_longitudinal: bool
+    detail: str
+
+
+class GuardrailReport(BaseModel):
+    """
+    Aggregated results from all four Task 5 robustness guardrail checks.
+    Stored in FinalReportSchema and injected into evidence so all agents
+    can cite ``guardrails[i]`` and ``guardrails.repeated_measures``.
+    """
+    flags: list[GuardrailFlag] = Field(default_factory=list)
+    repeated_measures: RepeatedMeasuresSchema | None = None
+    summary: str = ""
+    counts_by_type: dict[str, int] = Field(default_factory=dict)
+
+
+# ── Task 6 — Literature RAG (models live in tools.literature.rag to avoid circular import) ──
+from qtrial_backend.tools.literature.rag import LiteratureArticle, LiteratureRAGReport  # re-export
+
+
 # ── ClinicalSemanticsAgent ────────────────────────────────────────────────────
 
 ColumnRole = Literal[
@@ -76,8 +126,8 @@ class RankedUnknown(BaseModel):
     rank: int
     question: str
     category: Literal[
-        "protocol", "endpoint_definition", "data_provenance",
-        "statistical_plan", "population", "regulatory", "other"
+        "clinical_context", "treatment", "comorbidities", "follow_up",
+        "confounding", "mechanism", "population", "outcome_ascertainment", "other"
     ]
     impact: Literal["high", "medium", "low"]
     rationale: str
@@ -412,12 +462,73 @@ class LLMHypothesis(BaseModel):
     rationale: str = ""
 
 
+# ── Task 4B — Tool Dispatch schemas ──────────────────────────────────────────
+
+ToolDispatchType = Literal[
+    "baseline_balance",
+    "survival_analysis",
+    "missing_by_group",
+    "group_statistics",
+    "distribution_check",
+]
+
+
+class ToolDispatchRequest(BaseModel):
+    """
+    A structured request for a deterministic stats tool, produced by the
+    LLM hypothesis engine.  The dispatcher maps this to an actual registered
+    tool call.
+    """
+    tool_type: ToolDispatchType = Field(
+        ...,
+        description=(
+            "The type of analysis to run. Allowed values: "
+            "baseline_balance | survival_analysis | missing_by_group | "
+            "group_statistics | distribution_check"
+        ),
+    )
+    hypothesis_id: str = Field(
+        ..., description="Hypothesis ID this investigation supports."
+    )
+    columns: list[str] = Field(
+        ..., description="Column names from the dataset that this analysis requires."
+    )
+    group_column: str | None = Field(
+        default=None,
+        description="Column to use as the grouping variable (e.g. treatment arm).",
+    )
+    rationale: str = Field(
+        ..., description="One sentence: why this tool call is needed to test or refute the hypothesis."
+    )
+    priority: Literal["high", "medium", "low"] = "medium"
+
+
+class ToolDispatchResult(BaseModel):
+    """Result of one hypothesis-driven tool dispatch call."""
+    request: ToolDispatchRequest
+    tool_called: str = Field(..., description="Registered tool name that was executed.")
+    args_used: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    citation_alias: str = Field(
+        default="",
+        description="Stable citation alias, e.g. 'dispatched[0]'.",
+    )
+
+
 class HypothesisGenerationOutput(BaseModel):
     """Schema-validated LLM output for dynamic hypothesis generation."""
 
     hypotheses: list[LLMHypothesis]
     falsification_checks: list[FalsificationCheck] = Field(default_factory=list)
     hidden_questions: list[HiddenQuestion] = Field(default_factory=list)
+    tool_dispatch_requests: list[ToolDispatchRequest] = Field(
+        default_factory=list,
+        description=(
+            "Structured requests for deterministic stats tools to run in order "
+            "to test or falsify the generated hypotheses."
+        ),
+    )
 
 
 class ReasoningState(BaseModel):
@@ -453,6 +564,13 @@ class ReasoningState(BaseModel):
         description=(
             "Built at initialisation time from preview + evidence + tool_log. "
             "Used by deterministic claim validators."
+        ),
+    )
+    dispatched_tool_results: list[ToolDispatchResult] = Field(
+        default_factory=list,
+        description=(
+            "Results from hypothesis-driven tool dispatch calls (Task 4B). "
+            "Each entry maps one ToolDispatchRequest to its empirical output."
         ),
     )
 
@@ -530,5 +648,21 @@ class FinalReportSchema(BaseModel):
         description=(
             "Structured reasoning state produced by the Task 4A/4B reasoning "
             "engine.  None in runs that predate Task 4B wiring."
+        ),
+    )
+    # Task 5 — robustness guardrails (None in runs that predate Task 5)
+    guardrail_report: GuardrailReport | None = Field(
+        default=None,
+        description=(
+            "Robustness guardrail flags: low-cardinality numerics, range "
+            "violations, unit plausibility, and repeated-measures schema inference."
+        ),
+    )
+    # Task 6 — literature RAG (None when no hypotheses or retrieval disabled)
+    literature_report: LiteratureRAGReport | None = Field(
+        default=None,
+        description=(
+            "Hypothesis-driven literature retrieval results from PubMed / "
+            "Semantic Scholar. Articles appear as lit[i] citations in insights."
         ),
     )

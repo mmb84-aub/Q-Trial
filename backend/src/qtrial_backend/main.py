@@ -40,21 +40,18 @@ def insights(
             "See data/metadata_template.json for an example."
         ),
     ),
-    data_dictionary: str = typer.Option(
-        None,
-        "--data-dictionary",
-        "-d",
-        help="Path to JSON file mapping column names to plain-English descriptions",
-    ),
-    evidence_file: list[str] = typer.Option(
-        None,
-        "--evidence-file",
-        help="Optional evidence file path(s) to index for retrieval (repeat flag)",
-    ),
-    evidence_text: str = typer.Option(
-        None,
-        "--evidence-text",
-        help="Optional analyst note text to index for retrieval",
+    interactive: bool = typer.Option(
+        False,
+        "--interactive/--no-interactive",
+        help=(
+            "Enable interactive closed-loop Q&A (agentic mode only). "
+            "After the initial run the pipeline will ask you to answer "
+            "each high-impact unknown in the terminal, then re-run "
+            "ClinicalSemanticsAgent, UnknownsAgent, InsightSynthesisAgent, "
+            "and the Judge until all critical unknowns are resolved or you "
+            "choose to stop.  Compatible with --metadata (file answers are "
+            "applied first)."
+        ),
     ),
 ):
     """
@@ -93,7 +90,8 @@ def insights(
                 f"[bold]Mode:[/bold]     agentic\n"
                 f"[bold]Provider:[/bold] {provider}\n"
                 f"[bold]File:[/bold]     {file}\n"
-                f"[bold]Metadata:[/bold] {metadata or '(none)'}",
+                f"[bold]Metadata:[/bold] {metadata or '(none)'}\n"
+                f"[bold]Interactive:[/bold] {'yes' if interactive else 'no'}",
                 title="Q-Trial Agentic Pipeline",
             )
         )
@@ -103,6 +101,7 @@ def insights(
             max_rows=max_rows, max_cols=max_cols,
             run_judge=judge,
             metadata=meta_obj,
+            interactive=interactive,
         )
 
         fi = report.final_insights

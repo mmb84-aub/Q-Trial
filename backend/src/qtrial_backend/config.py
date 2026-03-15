@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _parse_keys(raw: str | None) -> list[str]:
+    """Split a comma-separated key string into a clean list."""
+    if not raw:
+        return []
+    return [k.strip() for k in raw.split(",") if k.strip()]
 
 
 @dataclass(frozen=True)
@@ -21,11 +28,14 @@ class Settings:
     openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
 
-    # NCBI E-utilities (optional, increases PubMed rate limit)
+    # Literature / RAG
     ncbi_api_key: str | None = os.getenv("NCBI_API_KEY")
-
-    # Semantic Scholar (optional, increases rate limit from ~100/5min to higher tiers)
     s2_api_key: str | None = os.getenv("S2_API_KEY")
+
+    @property
+    def gemini_api_keys(self) -> list[str]:
+        """All Gemini API keys (supports comma-separated list in GEMINI_API_KEY)."""
+        return _parse_keys(self.gemini_api_key)
 
     # Agent settings
     max_agent_iterations: int = int(os.getenv("MAX_AGENT_ITERATIONS", "25"))
