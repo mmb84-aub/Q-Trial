@@ -1,7 +1,7 @@
 /* ── Pipeline Tracker ───────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; background: transparent; }
+body { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; background: #ffffff; color: #111; }
 
 .pipeline-tracker {
   width: 100%;
@@ -68,9 +68,9 @@ body { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; background: tr
 }
 
 .stage-icon.pending {
-  background: #f8f8f8;
-  border-color: #ddd;
-  color: #ccc;
+  background: #f0f0f0;
+  border-color: #ccc;
+  color: #888;
 }
 
 @keyframes pulse-border {
@@ -81,7 +81,7 @@ body { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; background: tr
 .stage-label {
   font-size: 10px;
   font-weight: 600;
-  color: #999;
+  color: #555;
   margin-top: 6px;
   text-align: center;
   max-width: 90px;

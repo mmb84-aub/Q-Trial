@@ -57,7 +57,7 @@ html, body, [data-testid="stApp"] {
     font-size: 0.85rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #555;
+    color: #333;
     border-bottom: 1px solid #ddd;
     padding-bottom: 4px;
     margin-top: 16px;
@@ -75,7 +75,7 @@ h2 {
     background: transparent;
 }
 [data-baseweb="tab"] {
-    color: #777;
+    color: #444;
     font-size: 13px;
     font-weight: 500;
     padding: 10px 16px;
@@ -122,7 +122,7 @@ details[data-testid="stExpander"] summary { font-size: 13px; font-weight: 600; p
 .qtrial-header .sub    { color: #aaa; font-size: 12px; margin: 4px 0 0; letter-spacing: 0.04em; }
 .card { background:#fff; border:1px solid #e0e0e0; border-radius:6px; padding:14px 18px; margin-bottom:10px; }
 .card-dark { background:#f5f5f5; border:1px solid #d0d0d0; border-radius:6px; padding:14px 18px; margin-bottom:10px; }
-.section-label { font-size:10px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#888; margin-bottom:6px; }
+.section-label { font-size:10px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#555; margin-bottom:6px; }
 .badge { display:inline-block; padding:2px 9px; border-radius:3px; font-size:11px; font-weight:700; margin-right:4px; line-height:1.6; }
 .badge-high    { background:#111; color:#fff; }
 .badge-medium  { background:#555; color:#fff; }

@@ -10,11 +10,14 @@ report is purely data-driven.
 
 import datetime
 import re
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
+from rich.console import Console
 
 from qtrial_backend.agent.context import AgentContext
+
+console = Console()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -502,7 +505,11 @@ def _section_survival(ctx: AgentContext, time_col: str, event_col: str, group_co
 
 # ── Main entry point ───────────────────────────────────────────────────────────
 
-def build_static_report(df: pd.DataFrame, dataset_name: str) -> str:
+def build_static_report(
+    df: pd.DataFrame,
+    dataset_name: str,
+    emit: Callable | None = None,
+) -> str:
     """
     Run the full static analysis pipeline and return a Markdown report string.
     This function is deterministic — no LLM is involved.
@@ -512,33 +519,62 @@ def build_static_report(df: pd.DataFrame, dataset_name: str) -> str:
 
     ctx = AgentContext(dataframe=df, dataset_name=dataset_name)
 
+    console.print(
+        f"[bold cyan]► Static Analysis:[/bold cyan] "
+        f"Dataset [bold]{dataset_name}[/bold] "
+        f"({len(df)} rows × {len(df.columns)} cols)"
+    )
+
     # Auto-detect clinical structure
     treatment_col = _detect_treatment_col(df)
     time_col = _detect_time_col(df)
     event_col = _detect_event_col(df, time_col) if time_col else None
 
+    _det = []
+    if treatment_col: _det.append(f"treatment=[bold]{treatment_col}[/bold]")
+    if time_col:      _det.append(f"time=[bold]{time_col}[/bold]")
+    if event_col:     _det.append(f"event=[bold]{event_col}[/bold]")
+    if _det:
+        console.print("  [dim]Auto-detected: " + ", ".join(_det) + "[/dim]")
+
+    def _run(label: str, fn, *args, **kwargs) -> str:
+        console.print(f"  [yellow]▸[/yellow] {label}…")
+        if emit is not None:
+            try:
+                emit({"type": "progress", "stage": "StaticAnalysis", "message": f"Running {label}…"})
+            except Exception:
+                pass
+        result = fn(*args, **kwargs)
+        console.print(f"    [green]✓[/green] {label}")
+        if emit is not None:
+            try:
+                emit({"type": "progress", "stage": "StaticAnalysis", "message": f"✓ {label}"})
+            except Exception:
+                pass
+        return result
+
     sections = [
         f"# Static Analysis Report — {dataset_name}",
         f"> Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} · Fully deterministic, no LLM",
         "",
-        _section_overview(df, dataset_name),
+        _run("Overview",          _section_overview,       df, dataset_name),
         "",
-        _section_data_quality(ctx),
+        _run("Data Quality",      _section_data_quality,   ctx),
         "",
-        _section_column_profiles(ctx),
+        _run("Column Profiles",   _section_column_profiles, ctx),
         "",
-        _section_outliers(ctx),
+        _run("Outlier Detection", _section_outliers,       ctx),
         "",
-        _section_normality(ctx),
+        _run("Normality Tests",   _section_normality,      ctx),
         "",
-        _section_correlation(ctx),
+        _run("Correlation Matrix",_section_correlation,    ctx),
     ]
 
     if treatment_col:
-        sections += ["", _section_baseline_balance(ctx, treatment_col)]
+        sections += ["", _run("Baseline Balance", _section_baseline_balance, ctx, treatment_col)]
 
     if time_col and event_col:
-        sections += ["", _section_survival(ctx, time_col, event_col, treatment_col)]
+        sections += ["", _run("Survival Analysis", _section_survival, ctx, time_col, event_col, treatment_col)]
 
     # Footer
     sections += [
@@ -548,4 +584,5 @@ def build_static_report(df: pd.DataFrame, dataset_name: str) -> str:
         "findings, run targeted tests, and compare against published literature.",
     ]
 
+    console.print(f"  [bold green]✔ Static report complete[/bold green] ({sum(len(s) for s in sections)} chars)")
     return "\n".join(sections)

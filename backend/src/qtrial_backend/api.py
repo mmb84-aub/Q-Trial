@@ -150,13 +150,7 @@ async def run_analysis_stream(
 
     loop = asyncio.get_running_loop()
     aq: asyncio.Queue = asyncio.Queue()
-
-    # ── Run static report first (deterministic, no LLM) ──────────────────────
     dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
-    try:
-        static_report = build_static_report(df, dataset_name)
-    except Exception:
-        static_report = None
 
     def emit(event: dict) -> None:
         loop.call_soon_threadsafe(aq.put_nowait, event)
@@ -164,7 +158,12 @@ async def run_analysis_stream(
     def _run_pipeline() -> None:
         set_thread_emit(emit)
         try:
-            # Emit static report as its own stage so frontend can show it
+            # ── Run static report inside thread so emit works per-section ─────
+            try:
+                static_report = build_static_report(df, dataset_name, emit=emit)
+            except Exception:
+                static_report = None
+
             if static_report is not None:
                 loop.call_soon_threadsafe(
                     aq.put_nowait,
