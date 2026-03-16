@@ -98,6 +98,7 @@ def insights(
 
         # Generate deterministic static report first
         from qtrial_backend.report.static import build_static_report
+        from qtrial_backend.agent.runner import run_statistical_agent_loop
 
         dataset_name = Path(file).stem
         console.print("[bold cyan]► Static Analysis:[/bold cyan] Running deterministic statistical report…")
@@ -108,13 +109,25 @@ def insights(
             console.print(f"  [yellow]⚠ Static report skipped: {exc}[/yellow]")
             static_report = None
 
+        # Run LLM-driven statistical agent loop
+        try:
+            loop_report, tool_log = run_statistical_agent_loop(df, provider, dataset_name)
+        except Exception as exc:
+            console.print(f"  [yellow]⚠ Statistical agent loop skipped: {exc}[/yellow]")
+            loop_report, tool_log = None, None
+
+        # Combine both into analysis_report for the reasoning pipeline
+        parts = [p for p in [static_report, loop_report] if p]
+        analysis_report = "\n\n---\n\n".join(parts) if parts else None
+
         report = run_agentic_insights(
             df, provider,
             max_rows=max_rows, max_cols=max_cols,
             run_judge=judge,
             metadata=meta_obj,
             interactive=interactive,
-            analysis_report=static_report,
+            analysis_report=analysis_report,
+            tool_log=tool_log,
         )
 
         fi = report.final_insights

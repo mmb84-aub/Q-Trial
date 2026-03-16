@@ -10,17 +10,22 @@ import asyncio
 import io
 import json
 import threading
+import traceback
 from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from rich.console import Console
 
 from qtrial_backend.agentic.orchestrator import run_agentic_insights
 from qtrial_backend.agentic.schemas import MetadataInput
+from qtrial_backend.agent.runner import run_statistical_agent_loop
 from qtrial_backend.providers.gemini_client import set_thread_emit
 from qtrial_backend.report.static import build_static_report
+
+console = Console()
 
 app = FastAPI(
     title="Q-Trial Statistical Reasoning Engine",
@@ -87,6 +92,19 @@ async def run_analysis(
     except Exception:
         static_report = None
 
+    # ── Run LLM-driven statistical agent loop ────────────────────────────────
+    try:
+        loop_report, tool_log = await asyncio.to_thread(
+            run_statistical_agent_loop, df, provider, dataset_name
+        )
+    except Exception as exc:
+        console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
+        console.print(traceback.format_exc())
+        loop_report, tool_log = None, None
+
+    parts = [p for p in [static_report, loop_report] if p]
+    analysis_report = "\n\n---\n\n".join(parts) if parts else None
+
     # ── Run pipeline in thread pool (blocking → async) ───────────────────────
     try:
         report = await asyncio.to_thread(
@@ -94,12 +112,12 @@ async def run_analysis(
             df,
             provider,
             max_rows,
-            30,           # max_cols
+            30,
             run_judge,
             meta,
-            False,        # interactive — handled by UI
-            static_report,  # analysis_report — upstream statistical context
-            None,           # tool_log
+            False,
+            analysis_report,
+            tool_log,
         )
     except Exception as exc:
         raise HTTPException(
@@ -158,7 +176,7 @@ async def run_analysis_stream(
     def _run_pipeline() -> None:
         set_thread_emit(emit)
         try:
-            # ── Run static report inside thread so emit works per-section ─────
+            # ── 1. Deterministic static report ───────────────────────────────
             try:
                 static_report = build_static_report(df, dataset_name, emit=emit)
             except Exception:
@@ -174,9 +192,25 @@ async def run_analysis_stream(
                         "static_report": static_report,
                     },
                 )
+
+            # ── 2. LLM-driven statistical agent loop ─────────────────────────
+            try:
+                loop_report, tool_log = run_statistical_agent_loop(
+                    df, provider, dataset_name, emit=emit
+                )
+            except Exception as exc:
+                console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
+                console.print(traceback.format_exc())
+                loop_report, tool_log = None, None
+
+            # ── 3. Combine static + loop report for the reasoning pipeline ───
+            parts = [p for p in [static_report, loop_report] if p]
+            analysis_report = "\n\n---\n\n".join(parts) if parts else None
+
+            # ── 4. Full agentic + reasoning pipeline ─────────────────────────
             report = run_agentic_insights(
                 df, provider, max_rows, 30, run_judge, meta, False,
-                static_report, None, emit,
+                analysis_report, tool_log, emit,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

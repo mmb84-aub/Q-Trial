@@ -21,18 +21,19 @@ def _load(name: str) -> str:
 
 # Canonical ordered list of pipeline stages
 PIPELINE_STAGES = [
-    {"key": "StaticAnalysis",   "label": "Static Analysis"},
-    {"key": "dataset",          "label": "Evidence & Guardrails"},
-    {"key": "plan",             "label": "Planner"},
-    {"key": "DataQualityAgent", "label": "Data Quality"},
+    {"key": "StaticAnalysis",         "label": "Static Analysis"},
+    {"key": "StatisticalLoop",        "label": "Stat Agent Loop"},
+    {"key": "dataset",                "label": "Evidence & Guardrails"},
+    {"key": "plan",                   "label": "Planner"},
+    {"key": "DataQualityAgent",       "label": "Data Quality"},
     {"key": "ClinicalSemanticsAgent", "label": "Clinical Semantics"},
-    {"key": "UnknownsAgent",    "label": "Unknowns"},
-    {"key": "InsightSynthesisAgent", "label": "Insight Synthesis"},
-    {"key": "judge",            "label": "Judge"},
-    {"key": "reasoning",        "label": "Reasoning Engine"},
-    {"key": "hypotheses",       "label": "Hypotheses"},
-    {"key": "dispatch",         "label": "Tool Dispatch"},
-    {"key": "literature",       "label": "Literature RAG"},
+    {"key": "UnknownsAgent",          "label": "Unknowns"},
+    {"key": "InsightSynthesisAgent",  "label": "Insight Synthesis"},
+    {"key": "judge",                  "label": "Judge"},
+    {"key": "reasoning",              "label": "Reasoning Engine"},
+    {"key": "hypotheses",             "label": "Hypotheses"},
+    {"key": "dispatch",               "label": "Tool Dispatch"},
+    {"key": "literature",             "label": "Literature RAG"},
 ]
 
 
@@ -77,9 +78,13 @@ def render_pipeline_tracker_from_report(report: dict, height: int = 100) -> None
     """Infer completed stages from a finished report and render the tracker."""
     done: list[str] = []
 
-    # Static analysis is done if the report has prior_analysis_report
+    # Static analysis ran if report has prior_analysis_report
     if report.get("prior_analysis_report"):
         done.append("StaticAnalysis")
+
+    # Statistical agent loop ran if report has tool_log entries
+    if report.get("tool_log"):
+        done.append("StatisticalLoop")
 
     # Evidence/guardrails always runs if we have a report
     done.append("dataset")

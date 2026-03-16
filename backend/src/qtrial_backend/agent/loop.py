@@ -165,6 +165,7 @@ class AgentLoop:
                             "iteration": iterations,
                             "tool": tc.name,
                             "args": tc.arguments,
+                            "result": tool_result.content,
                             "is_error": tool_result.is_error,
                             "cached": False,
                         }
