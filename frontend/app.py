@@ -20,6 +20,7 @@ from __future__ import annotations
 import html as _html
 import io
 import json
+import os
 import traceback
 from typing import Any
 
@@ -27,7 +28,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-API_BASE = "http://localhost:8000"
+API_BASE = os.getenv("QTRIAL_API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -596,6 +597,90 @@ def _tab_dispatch(r: dict) -> None:
                 st.json(d["result"])
 
 
+# ── Tab: Statistical (dedicated statistical engine outputs) ─────────────────
+
+def _tab_statistical(r: dict) -> None:
+    rs = r.get("reasoning_state") or {}
+    results = rs.get("dispatched_tool_results", [])
+    if not results:
+        st.info("No statistical tool results in this run.")
+        return
+
+    stat_tools = {
+        "survival_analysis",
+        "baseline_balance",
+        "group_by_summary",
+        "distribution_info",
+        "correlation",
+        "crosstab",
+        "hypothesis_test",
+        "normality_test",
+        "pairwise_test",
+        "regression",
+        "effect_size",
+        "column_stats",
+    }
+
+    stat_results = [
+        d for d in results
+        if (d.get("tool_called") in stat_tools) or (d.get("request", {}).get("tool_type") in stat_tools)
+    ]
+
+    if not stat_results:
+        st.info("No recognized statistical dispatch entries were found in this report.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Statistical Runs", len(stat_results))
+    c2.metric("Successful", sum(1 for d in stat_results if not d.get("error")))
+    c3.metric("Errors", sum(1 for d in stat_results if d.get("error")))
+
+    st.markdown("---")
+    st.markdown("## Key Statistical Findings")
+
+    survival = next((d for d in stat_results if d.get("tool_called") == "survival_analysis"), None)
+    if survival and survival.get("result"):
+        payload = next(iter((survival.get("result") or {}).values()), {})
+        col1, col2, col3 = st.columns(3)
+        col1.metric("N Total", payload.get("n_total", "-"))
+        col2.metric("N Events", payload.get("n_events", "-"))
+        event_rate = payload.get("event_rate_pct")
+        col3.metric("Event Rate", f"{event_rate}%" if event_rate is not None else "-")
+
+    balance = next((d for d in stat_results if d.get("tool_called") == "baseline_balance"), None)
+    if balance and balance.get("result"):
+        payload = next(iter((balance.get("result") or {}).values()), {})
+        st.markdown("### Baseline Balance")
+        left, right = st.columns(2)
+        left.metric("Variables Checked", payload.get("n_variables", "-"))
+        right.metric("Imbalanced", payload.get("n_imbalanced", "-"))
+        imbalanced = payload.get("imbalanced_variables", [])
+        if imbalanced:
+            st.markdown("**Imbalanced variables:** " + ", ".join(f"`{v}`" for v in imbalanced))
+
+    st.markdown("---")
+    st.markdown("## Statistical Tool Outputs")
+    for d in stat_results:
+        req = d.get("request") or {}
+        alias = d.get("citation_alias", "-")
+        tool = d.get("tool_called", "-")
+        tool_type = req.get("tool_type", "-")
+        with st.expander(f"[{alias}] {tool} ({tool_type})"):
+            rationale = req.get("rationale")
+            if rationale:
+                st.markdown(f"**Rationale:** {rationale}")
+            cols = req.get("columns", [])
+            if cols:
+                st.markdown("**Columns:** " + ", ".join(f"`{c}`" for c in cols))
+            grp = req.get("group_column")
+            if grp:
+                st.markdown(f"**Group column:** `{grp}`")
+            if d.get("error"):
+                st.error(d["error"])
+            else:
+                st.json(d.get("result") or {})
+
+
 # ── Tab: Literature (Task 6) ──────────────────────────────────────────────────
 
 def _lit_article_card(art: dict, verdict_html: str = "") -> str:
@@ -1032,6 +1117,72 @@ def _tab_judge(r: dict) -> None:
             )
 
 
+# ── Tab: Agent Runs (raw per-agent outputs) ─────────────────────────────────
+
+def _tab_agent_runs(r: dict) -> None:
+    runs = r.get("agent_runs") or []
+    if not runs:
+        st.info("No agent outputs captured in this run.")
+        return
+
+    st.markdown(f"## {len(runs)} Agent Run(s)")
+    st.caption("Full outputs from each agent step in execution order.")
+
+    for run in runs:
+        step = run.get("step_number", "?")
+        agent = run.get("agent", "UnknownAgent")
+        goal = run.get("goal", "")
+        with st.expander(f"Step {step} - {agent}", expanded=False):
+            if goal:
+                st.markdown(f"**Goal:** {goal}")
+            output = run.get("output")
+            if output is None:
+                st.caption("No output payload for this step.")
+            else:
+                st.json(output)
+
+
+# ── Tab: All In One (single-scroll report) ───────────────────────────────────
+
+def _tab_all_in_one(r: dict, file_name: str) -> None:
+    st.caption("Single-page report view: all major outputs in one place.")
+
+    st.markdown("## Overview")
+    _tab_overview(r, file_name)
+
+    st.markdown("---")
+    st.markdown("## Guardrails")
+    _tab_guardrails(r)
+
+    st.markdown("---")
+    st.markdown("## Hypotheses")
+    _tab_hypotheses(r)
+
+    st.markdown("---")
+    st.markdown("## Statistical")
+    _tab_statistical(r)
+
+    st.markdown("---")
+    st.markdown("## Tool Dispatch")
+    _tab_dispatch(r)
+
+    st.markdown("---")
+    st.markdown("## Literature")
+    _tab_literature(r)
+
+    st.markdown("---")
+    st.markdown("## Agent Runs")
+    _tab_agent_runs(r)
+
+    st.markdown("---")
+    st.markdown("## Insights")
+    _tab_insights(r)
+
+    st.markdown("---")
+    st.markdown("## Judge")
+    _tab_judge(r)
+
+
 # ── Tab: Interactive Q&A (Task 3) ─────────────────────────────────────────────
 
 def _tab_qa(r: dict, file_bytes: bytes, file_name: str, provider: str,
@@ -1218,6 +1369,49 @@ def _pre_run_context_panel() -> str | None:
     return json.dumps(meta) if meta else None
 
 
+def _infer_foundation_requirements(df: pd.DataFrame | None) -> dict[str, Any]:
+    """Infer which foundational clarifications should be collected before analysis."""
+    if df is None or df.empty:
+        return {
+            "need_status_mapping": False,
+            "need_time_unit": False,
+            "status_candidates": [],
+            "time_candidates": [],
+        }
+
+    cols = list(df.columns)
+    lowered = {c: str(c).strip().lower() for c in cols}
+
+    # Detect likely time/follow-up columns.
+    time_candidates = [
+        c for c in cols
+        if any(k in lowered[c] for k in ("time", "follow", "duration", "survival"))
+    ]
+
+    # Detect likely endpoint/status columns with compact numeric coding (e.g., 0/1/2).
+    status_name_candidates = [
+        c for c in cols
+        if any(k in lowered[c] for k in ("event", "status", "death", "outcome"))
+    ]
+    status_candidates: list[str] = []
+    for c in status_name_candidates:
+        s = df[c]
+        non_null = s.dropna()
+        if non_null.empty:
+            continue
+        unique_vals = sorted(non_null.unique().tolist())
+        if len(unique_vals) <= 4 and all(isinstance(v, (int, float)) for v in unique_vals):
+            if all(float(v).is_integer() for v in unique_vals):
+                status_candidates.append(c)
+
+    return {
+        "need_status_mapping": len(status_candidates) > 0,
+        "need_time_unit": len(time_candidates) > 0,
+        "status_candidates": status_candidates,
+        "time_candidates": time_candidates,
+    }
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 def _sidebar():
@@ -1331,16 +1525,93 @@ def main() -> None:
         ):
             st.dataframe(df.head(10), use_container_width=True)
 
+    # Pre-analysis foundation gate (collect basic coding context first).
+    foundation = _infer_foundation_requirements(df)
+    pre_meta: dict[str, Any] = {}
+    if pre_metadata_json:
+        try:
+            pre_meta = json.loads(pre_metadata_json)
+        except Exception:
+            pre_meta = {}
+
+    inline_meta: dict[str, Any] = {}
+
+    if df is not None and (foundation.get("need_status_mapping") or foundation.get("need_time_unit")):
+        st.markdown("### Pre-analysis clarifications")
+        if foundation.get("status_candidates"):
+            cand = ", ".join(f"`{c}`" for c in foundation["status_candidates"])
+            st.caption(f"Detected likely status/event columns: {cand}")
+        if foundation.get("time_candidates"):
+            cand = ", ".join(f"`{c}`" for c in foundation["time_candidates"])
+            st.caption(f"Detected likely follow-up/time columns: {cand}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if foundation.get("need_status_mapping"):
+                status_mapping_inline = st.text_input(
+                    "Event/status code meanings",
+                    value=st.session_state.get("pre_status_mapping_inline", ""),
+                    placeholder="0=censored, 1=alive, 2=death",
+                    key="pre_status_mapping_inline",
+                    help="Accepted formats: 0=censored,1=death or JSON like {\"0\":\"censored\",\"2\":\"death\"}.",
+                ).strip()
+                if status_mapping_inline:
+                    parsed_status: dict[str, Any] | None = None
+                    try:
+                        parsed_status = json.loads(status_mapping_inline)
+                    except json.JSONDecodeError:
+                        parsed_status = _parse_simple_map(status_mapping_inline)
+                    if parsed_status:
+                        inline_meta["status_mapping"] = parsed_status
+                    else:
+                        st.error("Could not parse event/status mapping. Use key=value pairs or valid JSON.")
+
+        with c2:
+            if foundation.get("need_time_unit"):
+                default_time = ""
+                if isinstance(pre_meta.get("time_unit"), str):
+                    default_time = pre_meta["time_unit"]
+                time_unit_inline = st.selectbox(
+                    "Follow-up time unit",
+                    ["", "days", "months", "years"],
+                    index=["", "days", "months", "years"].index(default_time) if default_time in ("", "days", "months", "years") else 0,
+                    key="pre_time_unit_inline",
+                )
+                if time_unit_inline:
+                    inline_meta["time_unit"] = time_unit_inline
+
+    effective_meta = dict(pre_meta)
+    effective_meta.update(inline_meta)
+
+    missing_foundations: list[str] = []
+    if foundation.get("need_status_mapping") and not effective_meta.get("status_mapping"):
+        missing_foundations.append("Provide event/status code meanings (e.g., 0/1/2 labels).")
+    if foundation.get("need_time_unit") and not effective_meta.get("time_unit"):
+        missing_foundations.append("Provide follow-up time unit (days/months/years).")
+
+    effective_metadata_json = json.dumps(effective_meta) if effective_meta else None
+
+    if df is not None and (foundation.get("need_status_mapping") or foundation.get("need_time_unit")):
+        if missing_foundations:
+            st.warning(
+                "Please complete the foundation inputs below before running.\n\n"
+                + "\n".join(f"- {m}" for m in missing_foundations)
+            )
+        else:
+            st.success("✓ Foundation clarifications provided. Ready to run analysis.")
+
     # Trigger run
     if run_clicked:
         if file_bytes is None:
             st.warning("Please upload a dataset first.")
+        elif missing_foundations:
+            st.error("Run blocked until required pre-analysis clarifications are provided above.")
         else:
             with st.status("Running Q-Trial pipeline…", expanded=True) as status_box:
                 st.write("▶ Starting multi-agent pipeline…")
                 result = _api_run_stream(
                     file_bytes, file_name, provider, run_judge, max_rows,
-                    pre_metadata_json,
+                    effective_metadata_json,
                 )
             if result:
                 st.session_state["report"] = result
@@ -1356,25 +1627,31 @@ def main() -> None:
         return
 
     tabs = st.tabs([
+        "All In One",
         "Overview",
         "Guardrails",
         "Hypotheses",
+        "Statistical",
         "Tool Dispatch",
         "Literature",
+        "Agent Runs",
         "Insights",
         "Judge",
         "Interactive Q&A",
     ])
 
     fn = file_name or st.session_state.get("file_name", "")
-    with tabs[0]: _tab_overview(report, fn)
-    with tabs[1]: _tab_guardrails(report)
-    with tabs[2]: _tab_hypotheses(report)
-    with tabs[3]: _tab_dispatch(report)
-    with tabs[4]: _tab_literature(report)
-    with tabs[5]: _tab_insights(report)
-    with tabs[6]: _tab_judge(report)
-    with tabs[7]:
+    with tabs[0]: _tab_all_in_one(report, fn)
+    with tabs[1]: _tab_overview(report, fn)
+    with tabs[2]: _tab_guardrails(report)
+    with tabs[3]: _tab_hypotheses(report)
+    with tabs[4]: _tab_statistical(report)
+    with tabs[5]: _tab_dispatch(report)
+    with tabs[6]: _tab_literature(report)
+    with tabs[7]: _tab_agent_runs(report)
+    with tabs[8]: _tab_insights(report)
+    with tabs[9]: _tab_judge(report)
+    with tabs[10]:
         _tab_qa(
             report,
             file_bytes or st.session_state.get("file_bytes", b""),
