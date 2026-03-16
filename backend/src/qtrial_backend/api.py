@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from qtrial_backend.agentic.orchestrator import run_agentic_insights
 from qtrial_backend.agentic.schemas import MetadataInput
 from qtrial_backend.providers.gemini_client import set_thread_emit
+from qtrial_backend.report.static import build_static_report
 
 app = FastAPI(
     title="Q-Trial Statistical Reasoning Engine",
@@ -79,6 +80,13 @@ async def run_analysis(
                 status_code=422, detail=f"Invalid metadata JSON: {exc}"
             )
 
+    # ── Run static statistical report first (deterministic, no LLM) ─────────
+    dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
+    try:
+        static_report = await asyncio.to_thread(build_static_report, df, dataset_name)
+    except Exception:
+        static_report = None
+
     # ── Run pipeline in thread pool (blocking → async) ───────────────────────
     try:
         report = await asyncio.to_thread(
@@ -90,6 +98,8 @@ async def run_analysis(
             run_judge,
             meta,
             False,        # interactive — handled by UI
+            static_report,  # analysis_report — upstream statistical context
+            None,           # tool_log
         )
     except Exception as exc:
         raise HTTPException(
@@ -141,15 +151,33 @@ async def run_analysis_stream(
     loop = asyncio.get_running_loop()
     aq: asyncio.Queue = asyncio.Queue()
 
+    # ── Run static report first (deterministic, no LLM) ──────────────────────
+    dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
+    try:
+        static_report = build_static_report(df, dataset_name)
+    except Exception:
+        static_report = None
+
     def emit(event: dict) -> None:
         loop.call_soon_threadsafe(aq.put_nowait, event)
 
     def _run_pipeline() -> None:
         set_thread_emit(emit)
         try:
+            # Emit static report as its own stage so frontend can show it
+            if static_report is not None:
+                loop.call_soon_threadsafe(
+                    aq.put_nowait,
+                    {
+                        "type": "stage_complete",
+                        "stage": "StaticAnalysis",
+                        "message": "Static statistical report ready",
+                        "static_report": static_report,
+                    },
+                )
             report = run_agentic_insights(
                 df, provider, max_rows, 30, run_judge, meta, False,
-                None, None, emit,
+                static_report, None, emit,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

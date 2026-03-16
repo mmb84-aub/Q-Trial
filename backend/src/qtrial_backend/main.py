@@ -96,12 +96,25 @@ def insights(
             )
         )
 
+        # Generate deterministic static report first
+        from qtrial_backend.report.static import build_static_report
+
+        dataset_name = Path(file).stem
+        console.print("[bold cyan]► Static Analysis:[/bold cyan] Running deterministic statistical report…")
+        try:
+            static_report = build_static_report(df, dataset_name)
+            console.print(f"  [green]✓ Static report ready[/green] ({len(static_report)} chars)")
+        except Exception as exc:
+            console.print(f"  [yellow]⚠ Static report skipped: {exc}[/yellow]")
+            static_report = None
+
         report = run_agentic_insights(
             df, provider,
             max_rows=max_rows, max_cols=max_cols,
             run_judge=judge,
             metadata=meta_obj,
             interactive=interactive,
+            analysis_report=static_report,
         )
 
         fi = report.final_insights

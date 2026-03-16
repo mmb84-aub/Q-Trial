@@ -28,6 +28,8 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from components import render_pipeline_tracker_from_report, render_static_report
+
 API_BASE = os.getenv("QTRIAL_API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -291,6 +293,9 @@ def _api_run_stream(
 
         if etype == "stage_complete":
             st.write(f"✓ **{stage}** — {msg}")
+            # Capture static report from the StaticAnalysis stage event
+            if stage == "StaticAnalysis" and "static_report" in event:
+                st.session_state["static_report"] = event["static_report"]
         elif etype == "progress":
             st.write(f"⟳ {msg}")
         elif etype == "complete":
@@ -595,6 +600,30 @@ def _tab_dispatch(r: dict) -> None:
             elif d.get("result"):
                 st.markdown("**Result:**")
                 st.json(d["result"])
+
+
+# ── Tab: Static Analysis (deterministic statistical report) ──────────────────
+
+def _tab_static_analysis(r: dict) -> None:
+    static_md = r.get("prior_analysis_report") or st.session_state.get("static_report")
+    if not static_md:
+        st.info(
+            "No static analysis report available. "
+            "This is generated automatically when the pipeline runs."
+        )
+        return
+
+    st.markdown(
+        '<div class="section-label">Deterministic Analysis — No LLM</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "This report was generated purely from the data using statistical tools "
+        "(normality tests, correlations, survival analysis, baseline balance, etc.) "
+        "before any AI agent runs. It is fed as grounding context to the reasoning pipeline."
+    )
+
+    render_static_report(static_md, height=650)
 
 
 # ── Tab: Statistical (dedicated statistical engine outputs) ─────────────────
@@ -1151,6 +1180,10 @@ def _tab_all_in_one(r: dict, file_name: str) -> None:
     _tab_overview(r, file_name)
 
     st.markdown("---")
+    st.markdown("## Static Analysis")
+    _tab_static_analysis(r)
+
+    st.markdown("---")
     st.markdown("## Guardrails")
     _tab_guardrails(r)
 
@@ -1626,9 +1659,13 @@ def main() -> None:
         _render_landing()
         return
 
+    # Pipeline progress tracker (shows stage completion visually)
+    render_pipeline_tracker_from_report(report, height=100)
+
     tabs = st.tabs([
         "All In One",
         "Overview",
+        "Static Analysis",
         "Guardrails",
         "Hypotheses",
         "Statistical",
@@ -1643,15 +1680,16 @@ def main() -> None:
     fn = file_name or st.session_state.get("file_name", "")
     with tabs[0]: _tab_all_in_one(report, fn)
     with tabs[1]: _tab_overview(report, fn)
-    with tabs[2]: _tab_guardrails(report)
-    with tabs[3]: _tab_hypotheses(report)
-    with tabs[4]: _tab_statistical(report)
-    with tabs[5]: _tab_dispatch(report)
-    with tabs[6]: _tab_literature(report)
-    with tabs[7]: _tab_agent_runs(report)
-    with tabs[8]: _tab_insights(report)
-    with tabs[9]: _tab_judge(report)
-    with tabs[10]:
+    with tabs[2]: _tab_static_analysis(report)
+    with tabs[3]: _tab_guardrails(report)
+    with tabs[4]: _tab_hypotheses(report)
+    with tabs[5]: _tab_statistical(report)
+    with tabs[6]: _tab_dispatch(report)
+    with tabs[7]: _tab_literature(report)
+    with tabs[8]: _tab_agent_runs(report)
+    with tabs[9]: _tab_insights(report)
+    with tabs[10]: _tab_judge(report)
+    with tabs[11]:
         _tab_qa(
             report,
             file_bytes or st.session_state.get("file_bytes", b""),

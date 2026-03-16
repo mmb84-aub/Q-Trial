@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="pipeline-tracker" id="pipeline-tracker">
+  <div class="pipeline-title">Pipeline Progress</div>
+  <div class="pipeline-stages" id="pipeline-stages">
+    <!-- Stages injected by JS -->
+  </div>
+</div>
+<script src="pipeline.js"></script>
+<script>
+  // Stages will be set via the DATA placeholder
+  var STAGES = __STAGES_JSON__;
+  renderPipeline(STAGES);
+</script>
+</body>
+</html>
