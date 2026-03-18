@@ -1,67 +1,92 @@
 # Q-Trial
 
-Q-Trial is an AI-powered agent for analyzing clinical trial datasets and generating structured, grounded insights.
+Q-Trial is an AI-powered agentic system for exploring clinical trial datasets and generating grounded, structured insights.
 
-The system combines:
-- Dataset statistical analysis
-- Retrieval-Augmented Generation (RAG)
-- LLM-based insight generation
-- LLM-as-a-judge evaluation framework
+It combines deterministic statistical analysis, retrieval-augmented evidence, multi-step LLM reasoning, and validation layers to help surface patterns, risks, unanswered questions, and trial-relevant insights from structured data.
 
-The goal is to automatically surface meaningful patterns, risks, and optimization opportunities in clinical trial data while maintaining interpretability and grounding.
+The repository includes the core backend analysis engine, API layer, and interactive frontend.
 
 ---
 
 ## 🚀 Current Status
 
-This repository is in early development.
+This repository is under active development, but it already includes a working end-to-end pipeline with:
+
+- Clinical trial dataset ingestion and previewing
+- Statistical analysis and data quality checks
+- Deterministic evidence extraction and guardrails
+- Agentic insight generation and reasoning
+- Hypothesis-driven follow-up analysis
+- Literature retrieval and evidence grounding
+- Judge-based evaluation and confidence validation
+- CLI, API, and frontend interfaces
 
 ---
 
-## 🧠 Core Components (Planned)
+## 🧠 What Q-Trial Does
 
-- Dataset ingestion & profiling
-- Statistical health scoring
-- Feature validation & quality checks
-- Dynamic RAG retriever
-- Insight generation agent
-- Insight evaluation suite
-- Judge-based scoring system
+Q-Trial is designed to go beyond simple dataset summarization.
 
----
+At a high level, the system can:
 
-## 🎯 Vision
-
-To build a research-grade clinical trial optimization assistant capable of:
-- Identifying dataset risks
-- Detecting biases and imbalance
-- Suggesting feature engineering improvements
-- Supporting trial design decisions
+- Inspect and profile structured clinical datasets
+- Detect data quality issues, inconsistencies, and risks
+- Generate grounded insights using LLM-based reasoning
+- Validate claims using deterministic checks and supporting evidence
+- Surface unknowns, hidden questions, and follow-up hypotheses
+- Retrieve external biomedical literature to strengthen evidence
+- Support iterative refinement through metadata and user feedback
 
 ---
 
-## 📌 Roadmap
+## 🏗 Repository Structure
 
-- [ ] Dataset analyzer module
-- [ ] RAG retriever
-- [ ] Insight generator
-- [ ] Evaluation framework
-- [ ] Benchmark suite
-- [ ] Paper-ready evaluation outputs
+This repository contains multiple layers of the Q-Trial system, including:
+
+- **Backend**: core analysis pipeline, orchestration, tools, reasoning, RAG, and API
+- **Frontend**: interactive interface for uploading datasets and exploring outputs
+
+More detailed implementation information should live in the dedicated backend and frontend READMEs.
 
 ---
 
-## 🛠 Tech Stack (Planned)
+## 🎯 Project Vision
+
+Q-Trial aims to become a research-grade clinical trial intelligence assistant that helps researchers and teams:
+
+- identify dataset risks and blind spots
+- uncover meaningful statistical and clinical signals
+- generate evidence-grounded insights
+- support better trial interpretation and decision-making
+- improve transparency and trust in AI-assisted analysis workflows
+
+---
+
+## 📌 Repository-Level Focus
+
+At the repository level, Q-Trial currently centers on:
+
+- End-to-end clinical dataset analysis
+- Agentic reasoning over structured evidence
+- Statistical and literature-backed insight generation
+- Validation, guardrails, and confidence-aware outputs
+- Developer-friendly interfaces for experimentation and iteration
+
+---
+
+## 🛠 Tech Stack
 
 - Python 3.11+
 - Pandas / NumPy
-- Scikit-learn
-- LLM APIs
-- Vector retrieval
-- Statistical evaluation tools
+- Statistical analysis tooling
+- LLM provider integrations
+- Retrieval / evidence pipeline components
+- FastAPI
+- Streamlit
 
 ---
 
 ## ⚠️ Note
 
-This is an experimental research project and is under active development.
+Q-Trial is an experimental research and engineering project under active development.  
+Interfaces, features, and architecture may continue to evolve as the system matures.

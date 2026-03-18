@@ -1,295 +1,291 @@
 # Q-Trial Backend
 
-Python backend for generating AI-powered, evidence-grounded analysis reports from clinical trial datasets.
+Python backend powering the **Q-Trial clinical trial intelligence system**.
 
-This backend:
-* Loads a CSV or Excel dataset
-* Builds a structured preview (schema, head rows, missingness, numeric summary)
-* Runs an **agentic analysis loop** — the LLM iteratively calls 30+ statistical and literature tools to explore the data
-* Produces a comprehensive, reproducible clinical trial report with effect sizes, literature citations, and recommendations
+The backend is responsible for ingesting datasets, running the analysis pipeline, orchestrating LLM reasoning, executing statistical tools, retrieving literature evidence, and producing structured insight reports.
 
-### Supported Providers
-* **OpenAI** (GPT-4o, etc.)
-* **Google Gemini**
-* **Anthropic Claude**
-* **OpenRouter** — access any model (OpenAI, Anthropic, Meta, Mistral, etc.) through a single API key
+It exposes both:
 
-> This is the foundational layer of the Q-Trial system.
+- a **CLI interface** for experimentation and research workflows  
+- a **FastAPI service** used by the frontend and external integrations
 
 ---
 
-## What It Does
+# What the Backend Does
 
-### Two Modes
+The backend implements an **agentic analysis pipeline** that combines deterministic statistics with LLM reasoning.
 
-#### 1. Quick Insights (`qtrial insights`)
-Single-shot LLM call that returns high-level observations about the dataset.
+At a high level it can:
 
-#### 2. Agentic Analysis (`qtrial analyze`)
-A multi-iteration agent loop where the LLM:
-1. Inspects the dataset schema, preview rows, and optional **data dictionary**
-2. Iteratively calls statistical tools (normality tests, hypothesis tests, survival analysis, regression, etc.)
-3. Searches biomedical literature (PubMed, Semantic Scholar) and builds an evidence table
-4. Produces a structured report with 8 sections (see Report Format below)
-
-### Pipeline
-1. **Dataset** (CSV/XLSX)
-2. **Pandas DataFrame**
-3. **Dataset Preview Builder** (schema, head, missingness, numeric stats)
-4. **Optional Data Dictionary** (column → plain-English description)
-5. **Agent Loop** (LLM ↔ 30+ tools, up to 25 iterations)
-6. **Structured Clinical Report**
-
-**Important:**
-* The full dataset is **NOT** sent to the model.
-* Only a structured preview is transmitted to control context size and cost.
-* Tools operate on the full dataset server-side and return summarised results.
+- Load and profile clinical trial datasets
+- Detect data quality issues and dataset risks
+- Run statistical analysis and hypothesis tests
+- Generate structured insights using LLM reasoning
+- Validate claims using deterministic checks
+- Retrieve biomedical literature to ground conclusions
+- Surface unknowns and follow-up questions
+- Produce structured outputs suitable for downstream reporting
 
 ---
 
-## Report Format
+# Core Capabilities
 
-The agent produces a report with exactly these sections:
+### Dataset Ingestion & Profiling
 
-1. **Dataset Overview** — structure, size, variable types, study design inference
-2. **Data Quality Assessment** — missingness, duplicates, type issues, outliers
-3. **Baseline Characteristics** — Table 1 with SMD (for RCTs), randomisation quality
-4. **Key Statistical Findings** — effect sizes, CIs, corrected p-values
-5. **Survival Analysis** (if applicable) — KM curves, median survival, Cox HR
-6. **Feature Relations & Derived Features** — inter-feature relationships, proposed new features, underlying patterns and clusters
-7. **Literature Comparison** — findings vs. published benchmarks with registered citations
-8. **Recommendations** — unresolved questions, sensitivity analyses, next steps
+The backend loads CSV or Excel datasets and builds a structured dataset preview containing:
 
----
+- schema and variable types
+- preview rows
+- missingness statistics
+- numeric summaries
+- dataset-level evidence
 
-## Available Tools
-
-The agent has access to these tool categories:
-
-| Category | Tools |
-|---|---|
-| **Data Quality** | `duplicate_checks`, `type_coercion_suggestions`, `missing_data_patterns` |
-| **Exploration** | `column_detailed_stats`, `value_counts`, `sample_rows`, `outlier_detection` |
-| **Descriptive** | `group_by_summary`, `correlation_matrix`, `cross_tabulation`, `distribution_info`, `plot_spec` |
-| **Clinical Trial** | `baseline_balance`, `stat_test_selector` |
-| **Inferential** | `normality_test`, `hypothesis_test`, `pairwise_group_test`, `effect_size`, `survival_analysis`, `regression`, `multiple_testing_correction` |
-| **Literature** | `search_pubmed`, `search_semantic_scholar`, `evidence_table_builder`, `citation_manager` |
+The full dataset **never leaves the backend** — only summarized previews are sent to the model.
 
 ---
 
-## Data Dictionary Support
+### Deterministic Evidence & Guardrails
 
-You can provide a JSON file that maps column names to plain-English descriptions so the model does not assume anything about the input data:
+Before LLM reasoning begins, the system extracts deterministic signals such as:
 
-```json
-{
-  "id": "Patient identifier",
-  "time": "Days between registration and death/transplant/study end",
-  "status": "0=censored, 1=transplant, 2=dead",
-  "trt": "Treatment arm: 1=D-penicillamine, 2=placebo",
-  "age": "Age in years at registration",
-  "sex": "Patient sex: m=male, f=female"
-}
+- missing data patterns
+- duplicate identifiers
+- outlier summaries
+- correlations
+- cardinality issues
+
+Additional guardrails detect dataset risks including:
+
+- low-cardinality numeric columns
+- implausible physiological values
+- unit inconsistencies
+- repeated measurements
+
+These signals act as **grounding evidence for the analysis pipeline**.
+
+---
+
+### Agentic Analysis Pipeline
+
+The backend orchestrates a multi-step agentic pipeline where specialized agents analyze the dataset:
+
+1. Data Quality Analysis  
+2. Clinical Semantics Interpretation  
+3. Unknown Detection  
+4. Insight Synthesis  
+
+The pipeline may then optionally run a **Judge agent** that evaluates the reliability and grounding of the generated insights.
+
+---
+
+### Statistical Tool Execution
+
+The LLM can call a large set of statistical tools that operate directly on the dataset.
+
+These tools cover:
+
+- data quality checks
+- descriptive statistics
+- hypothesis testing
+- effect size computation
+- regression analysis
+- survival analysis
+- multiple testing correction
+
+All statistical computation runs **server-side on the full dataset**.
+
+---
+
+### Hypothesis-Driven Analysis
+
+The system can dynamically generate hypotheses and follow-up checks based on earlier findings.
+
+These hypotheses may trigger:
+
+- additional statistical tests
+- targeted dataset exploration
+- literature retrieval
+
+This allows the analysis to move beyond static summaries and perform **iterative discovery**.
+
+---
+
+### Literature Retrieval
+
+The backend integrates biomedical search APIs to compare dataset findings with published research.
+
+Supported sources:
+
+- PubMed  
+- Semantic Scholar  
+
+Retrieved papers can be summarized and cited in the final report.
+
+---
+
+### Evidence Retrieval (RAG)
+
+The backend includes a lightweight evidence retrieval subsystem that can index:
+
+- dataset evidence
+- tool outputs
+- retrieved literature
+
+Relevant evidence can then be retrieved during reasoning to support or validate claims.
+
+---
+
+# Supported LLM Providers
+
+The backend supports multiple providers through a unified routing layer:
+
+- OpenAI  
+- Google Gemini  
+- Anthropic Claude  
+- OpenRouter  
+
+Provider-specific tool schemas and message formats are handled automatically.
+
+---
+
+# Interfaces
+
+### CLI
+
+The CLI is useful for experimentation, benchmarking, and reproducible analysis runs.
+
+Example:
+
+```bash
+poetry run qtrial analyze --file data/pbc.csv --provider openai
 ```
 
-Pass it with `--data-dictionary`:
-```bash
-poetry run qtrial analyze --file data/pbc.csv --data-dictionary data/pbc_dict.json
-```
+---
 
-The descriptions are injected verbatim into the prompt as authoritative definitions.
+### API (FastAPI)
+
+The backend also exposes a FastAPI server used by the frontend.
+
+Available endpoints include:
+
+- dataset analysis
+- streaming run progress
+- health checks
 
 ---
 
-## Requirements
-* Python 3.12+
-* API key for at least one provider
+# Project Structure
 
-### Option A: Install with Poetry
+```text
+backend/
+  src/qtrial_backend/
 
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
-export PATH="$HOME/.local/bin:$PATH"
+    main.py                CLI entrypoint
+    api.py                 FastAPI server
+
+    agent/                 agent loop and runtime context
+    agentic/               planner, specialist agents, orchestrator, judge
+    dataset/               ingestion, preview building, evidence extraction, guardrails
+    rag/                   evidence indexing and retrieval
+    report/                deterministic report generation
+
+    core/                  shared types and provider router
+    providers/             OpenAI, Gemini, Claude, OpenRouter integrations
+
+    tools/
+      stats/               statistical analysis tools
+      literature/          PubMed and Semantic Scholar integrations
+      registry.py          tool registration system
 ```
 
-Verify:
-```bash
-poetry --version
+---
+
+# Environment Variables
+
+Create a `.env` file inside `backend/`.
+
+Example:
+
+```env
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
+
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.5-flash
+
+ANTHROPIC_API_KEY=...
+CLAUDE_MODEL=claude-opus-4
+
+OPENROUTER_API_KEY=...
+OPENROUTER_MODEL=openai/gpt-4o
 ```
 
-From inside `backend/`:
+Optional keys:
+
+```env
+NCBI_API_KEY=...
+S2_API_KEY=...
+```
+
+---
+
+# Installation
+
+### With Poetry
+
 ```bash
-poetry config virtualenvs.in-project true
 poetry install
 ```
 
-This creates: `backend/.venv/`
+---
 
-> If VS Code does not detect dependencies, select the interpreter manually at `backend/.venv/bin/python`
+### With pip
 
-### Option B: Install with pip (no Poetry)
-
-From inside `backend/`:
 ```bash
 python -m venv .venv
-
-# Activate the virtual environment
-# Linux / Mac:
 source .venv/bin/activate
-# Windows:
-.venv\Scripts\activate
-
 pip install -e .
 ```
 
 ---
 
-## Environment Variables
+# Running the Backend
 
-Create a `.env` file inside `backend/`. Only set the provider(s) you intend to use.
+Example CLI run:
 
-```env
-# --- Direct providers ---
-OPENAI_API_KEY=your_openai_key
-OPENAI_MODEL=gpt-4o-mini
-
-GEMINI_API_KEY=your_gemini_key
-GEMINI_MODEL=gemini-2.5-flash
-
-ANTHROPIC_API_KEY=your_anthropic_key
-CLAUDE_MODEL=claude-opus-4-6
-
-# --- OpenRouter (access any model via one key) ---
-OPENROUTER_API_KEY=sk-or-...
-OPENROUTER_MODEL=openai/gpt-4o          # any model slug from openrouter.ai/models
-
-# --- Optional: increase rate limits ---
-NCBI_API_KEY=your_ncbi_key              # PubMed E-utilities
-S2_API_KEY=your_s2_key                  # Semantic Scholar
-
-# --- Agent tuning ---
-MAX_AGENT_ITERATIONS=25
-MAX_TOOL_RESULT_CHARS=4000
-```
-
----
-
-## Project Structure
-
-```
-backend/
-  data/
-    pbc.csv                        # sample dataset
-    pbc_dict.json                  # sample data dictionary
-  src/qtrial_backend/
-    config.py                      # env-based settings
-    main.py                        # CLI (typer)
-    agent/
-      context.py                   # shared state (dataframe, caches, citations)
-      loop.py                      # while-loop orchestrator (LLM ↔ tools)
-    core/
-      types.py                     # ProviderName, Message, ToolCall, ChatResponse, etc.
-      router.py                    # provider routing
-    dataset/
-      load.py                      # CSV/XLSX ingestion
-      preview.py                   # structured preview builder
-    prompts/
-      insights.py                  # single-shot insight prompt
-      agent_system.py              # agent system prompt + initial message template
-    providers/
-      base.py                      # LLMClient ABC
-      openai_client.py             # OpenAI direct
-      gemini_client.py             # Google Gemini
-      claude_client.py             # Anthropic Claude
-      openrouter_client.py         # OpenRouter (OpenAI-compatible)
-    tools/
-      registry.py                  # @tool decorator + ToolRegistry
-      converter.py                 # tool schema → provider format
-      stats/                       # 20+ statistical tools
-      literature/                  # PubMed, Semantic Scholar, evidence table, citation manager
-  pyproject.toml
-```
-
----
-
-## Running the CLI
-
-Place your dataset inside `backend/data/` (e.g., `backend/data/pbc.csv`).
-
-### Quick Insights (single-shot)
 ```bash
-poetry run qtrial insights --file data/pbc.csv --provider openai
+poetry run qtrial analyze \
+  --file data/pbc.csv \
+  --provider openai
 ```
 
-### Agentic Analysis (multi-iteration)
-```bash
-# OpenAI
-poetry run qtrial analyze --file data/pbc.csv --provider openai
+Supported file formats:
 
-# Gemini
-poetry run qtrial analyze --file data/pbc.csv --provider gemini
-
-# Claude
-poetry run qtrial analyze --file data/pbc.csv --provider claude
-
-# OpenRouter (any model)
-poetry run qtrial analyze --file data/pbc.csv --provider openrouter
-
-# With data dictionary + verbose logging
-poetry run qtrial analyze --file data/pbc.csv --provider openrouter \
-  --data-dictionary data/pbc_dict.json --verbose
-```
-
-Supported file types: `.csv`, `.xlsx`
+- `.csv`
+- `.xlsx`
 
 ---
 
-## Technical Details
+# Development Notes
 
-### What the Model Receives
-* Dataset shape
-* Column schema (names + dtypes)
-* Column descriptions (if data dictionary provided)
-* First 5 rows (preview)
-* Missingness percentages
-* Numeric summary statistics
+The backend is designed around a **modular architecture**:
 
-### What the Agent Does Server-Side
-* Runs all statistical computations on the **full dataset** via tools
-* Caches duplicate tool calls automatically
-* Enforces citation traceability (no fabricated references)
-* Applies multiple testing correction when > 5 tests are run
+- provider-agnostic LLM routing  
+- deterministic statistical computation  
+- tool-driven exploration  
+- evidence-grounded reasoning  
 
-### Current Limitations
-* No API server (CLI only)
-* No evaluation/judge system yet
-* No RAG grounding yet
+This structure allows the system to evolve while keeping the core analysis pipeline transparent and reproducible.
 
-#### CLI vs API
-This backend is currently CLI-based. It is intentionally built this way for:
+---
 
-Rapid experimentation
+# Current Status
 
-Reproducibility
+The backend is functional but still evolving.
 
-Provider benchmarking
+Active areas of development include:
 
-Research workflow
-
-An API wrapper (FastAPI) can be added later without modifying core logic.
-
-### Next Planned Improvements
-Structured JSON output mode
-
-Save outputs to file
-
-Provider comparison mode
-
-RAG integration
-
-Evaluation suite
-
-FastAPI wrapper
-
-### Development Notes
-This focuses on a clean modular architecture, provider abstraction, and controlled prompt inputs for research extensibility.
+- improving reasoning validation
+- expanding statistical tool coverage
+- improving literature grounding
+- strengthening evaluation and benchmarking workflows
