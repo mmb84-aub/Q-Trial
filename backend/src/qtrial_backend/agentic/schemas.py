@@ -360,6 +360,40 @@ class ClaimDraft(BaseModel):
     )
 
 
+class InternalEvidenceSnippet(BaseModel):
+    """One retrieved snippet used for internal post-reasoning verification."""
+
+    rank: int = Field(..., ge=1)
+    score: float
+    snippet: str
+    source_type: str = ""
+    source_name: str = ""
+    chunk_id: str = ""
+    matched_terms: list[str] = Field(default_factory=list)
+
+
+class ClaimInternalVerification(BaseModel):
+    """Verification result for one claim against internal BM25 evidence."""
+
+    claim_id: str
+    claim_text: str
+    validation_status: Literal["pending", "valid", "flagged", "rejected"]
+    support_status: Literal["supported", "weakly_supported", "unsupported", "unclear"]
+    rationale: str = ""
+    top_evidence: list[InternalEvidenceSnippet] = Field(default_factory=list)
+
+
+class InternalVerificationSummary(BaseModel):
+    """Aggregate statistics for internal claim verification."""
+
+    total_claims: int = 0
+    supported: int = 0
+    weakly_supported: int = 0
+    unsupported: int = 0
+    unclear: int = 0
+    index_chunks: int = 0
+
+
 class Contradiction(BaseModel):
     """A tracked contradiction between two hypotheses."""
 
@@ -572,6 +606,17 @@ class ReasoningState(BaseModel):
             "Results from hypothesis-driven tool dispatch calls (Task 4B). "
             "Each entry maps one ToolDispatchRequest to its empirical output."
         ),
+    )
+    internal_verification: list[ClaimInternalVerification] = Field(
+        default_factory=list,
+        description=(
+            "Post-reasoning internal evidence verification results over the "
+            "runtime BM25 corpus built from statistical outputs."
+        ),
+    )
+    internal_verification_summary: InternalVerificationSummary | None = Field(
+        default=None,
+        description="Aggregate counts for internal BM25 claim verification.",
     )
 
 

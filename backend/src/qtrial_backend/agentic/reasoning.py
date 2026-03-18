@@ -22,13 +22,17 @@ All schemas live in agentic.schemas to avoid circular imports.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Literal
 
 from qtrial_backend.agentic.schemas import (
+    ClaimInternalVerification,
     ClaimDraft,
     ConfidenceSummary,
+    InternalEvidenceSnippet,
+    InternalVerificationSummary,
     MetadataInput,
     ReasoningState,
     ReasoningStepLog,
@@ -36,6 +40,9 @@ from qtrial_backend.agentic.schemas import (
     StopCondition,
     ToolCallRecord,
 )
+from qtrial_backend.rag import BM25Retriever, EvidenceStore, RetrievalQuery
+from qtrial_backend.rag.bm25_retriever import tokenize_query
+from qtrial_backend.rag.ingestion import ingest_text, ingest_tool_result
 
 
 # ── Validation result ─────────────────────────────────────────────────────────
@@ -646,6 +653,170 @@ def _extract_inline_citations(text: str) -> list[str]:
     return list(dict.fromkeys(_CITE_TOKEN_RE.findall(text)))
 
 
+def _build_runtime_retrieval_index(
+    analysis_report: str | None,
+    tool_log: list[ToolCallRecord] | None,
+) -> tuple[EvidenceStore, BM25Retriever]:
+    """Build a temporary BM25 index from existing runtime artifacts.
+
+    Sources indexed:
+    - analysis_report markdown text (when present)
+    - successful tool_log results as tool_result documents
+    """
+    store = EvidenceStore()
+    retriever = BM25Retriever()
+
+    if analysis_report and analysis_report.strip():
+        report_doc = ingest_text(
+            text=analysis_report,
+            name="analysis_report",
+            source_type="user_input",
+            metadata={"source": "analysis_report"},
+        )
+        store.add_document(report_doc)
+
+    if tool_log:
+        for rec in tool_log:
+            if rec.error:
+                continue
+
+            if rec.result is None:
+                continue
+
+            if isinstance(rec.result, str):
+                result_text = rec.result
+            else:
+                try:
+                    result_text = json.dumps(rec.result, default=str, ensure_ascii=False)
+                except Exception:
+                    result_text = str(rec.result)
+
+            if not result_text.strip():
+                continue
+
+            try:
+                doc = ingest_tool_result(
+                    tool_name=rec.tool_name,
+                    arguments=rec.args,
+                    result_text=result_text,
+                    metadata={
+                        "citation_alias": rec.citation_alias,
+                        "origin": "tool_log",
+                    },
+                )
+                store.add_document(doc)
+            except Exception:
+                # Never block reasoning on index build noise.
+                continue
+
+    retriever.index(store.all_chunks())
+    return store, retriever
+
+
+def _support_status_from_hits(
+    claim_text: str,
+    snippets: list[InternalEvidenceSnippet],
+) -> tuple[Literal["supported", "weakly_supported", "unsupported", "unclear"], str]:
+    """Assign conservative deterministic support labels from retrieval hits."""
+    if not snippets:
+        return "unclear", "No internal evidence snippets were retrieved for this claim."
+
+    query_terms = set(tokenize_query(claim_text))
+    best = snippets[0]
+    best_overlap = 0.0
+    if query_terms:
+        best_overlap = len(set(best.matched_terms)) / max(len(query_terms), 1)
+
+    # Conservative thresholds to avoid overstating support.
+    if best.score >= 2.0 and best_overlap >= 0.30:
+        return (
+            "supported",
+            (
+                f"High-scoring internal evidence (score={best.score:.3f}) with "
+                f"substantial token overlap ({best_overlap:.2f})."
+            ),
+        )
+
+    if best.score >= 1.0 and best_overlap >= 0.15:
+        return (
+            "weakly_supported",
+            (
+                f"Moderate retrieval match (score={best.score:.3f}, overlap={best_overlap:.2f}); "
+                "claim aligns with evidence but support is limited."
+            ),
+        )
+
+    if best.score < 0.5 and best_overlap < 0.08:
+        return (
+            "unsupported",
+            (
+                f"Best retrieved evidence is weak (score={best.score:.3f}, overlap={best_overlap:.2f})."
+            ),
+        )
+
+    return "unclear", "Retrieved evidence is mixed or insufficient for a confident support decision."
+
+
+def verify_claims_with_internal_evidence(
+    claims: list[ClaimDraft],
+    analysis_report: str | None,
+    tool_log: list[ToolCallRecord] | None,
+    *,
+    top_k: int = 3,
+) -> tuple[list[ClaimInternalVerification], InternalVerificationSummary]:
+    """Run post-reasoning claim verification against a BM25 runtime corpus."""
+    _, retriever = _build_runtime_retrieval_index(analysis_report, tool_log)
+
+    verifications: list[ClaimInternalVerification] = []
+
+    for claim in claims:
+        hits = retriever.retrieve(
+            RetrievalQuery(text=claim.text, top_k=top_k, min_score=0.0)
+        )
+
+        query_terms = set(tokenize_query(claim.text))
+        snippets: list[InternalEvidenceSnippet] = []
+        for h in hits:
+            chunk_terms = set(tokenize_query(h.chunk.text))
+            matched_terms = sorted(list(query_terms.intersection(chunk_terms)))[:20]
+            snippet_text = h.chunk.text[:280] + ("..." if len(h.chunk.text) > 280 else "")
+            snippets.append(
+                InternalEvidenceSnippet(
+                    rank=h.rank,
+                    score=round(float(h.score), 6),
+                    snippet=snippet_text,
+                    source_type=str(h.provenance.source_type),
+                    source_name=str(h.provenance.source_name),
+                    chunk_id=str(h.provenance.chunk_id),
+                    matched_terms=matched_terms,
+                )
+            )
+
+        support_status, rationale = _support_status_from_hits(claim.text, snippets)
+
+        verifications.append(
+            ClaimInternalVerification(
+                claim_id=claim.claim_id,
+                claim_text=claim.text,
+                validation_status=claim.validation_status,
+                support_status=support_status,
+                rationale=rationale,
+                top_evidence=snippets,
+            )
+        )
+
+    summary = InternalVerificationSummary(
+        total_claims=len(verifications),
+        supported=sum(1 for v in verifications if v.support_status == "supported"),
+        weakly_supported=sum(1 for v in verifications if v.support_status == "weakly_supported"),
+        unsupported=sum(1 for v in verifications if v.support_status == "unsupported"),
+        unclear=sum(1 for v in verifications if v.support_status == "unclear"),
+        index_chunks=retriever.index_size,
+    )
+
+    return verifications, summary
+
+
 def run_reasoning_engine(
     *,
     run_id: str,
@@ -742,12 +913,60 @@ def run_reasoning_engine(
         ),
     )
 
+    # ── 2b. Internal BM25 post-reasoning verification ─────────────────
+    internal_verification, iv_summary = verify_claims_with_internal_evidence(
+        claims=validated_claims,
+        analysis_report=analysis_report,
+        tool_log=tool_log,
+    )
+    state = state.model_copy(
+        update={
+            "internal_verification": internal_verification,
+            "internal_verification_summary": iv_summary,
+        }
+    )
+
+    state = append_reasoning_step(
+        state,
+        step_type="validation",
+        inputs=[c.claim_id for c in validated_claims],
+        outputs=[
+            f"internal_supported={iv_summary.supported}",
+            f"internal_weak={iv_summary.weakly_supported}",
+            f"internal_unsupported={iv_summary.unsupported}",
+            f"internal_unclear={iv_summary.unclear}",
+        ],
+        notes=(
+            "Post-reasoning internal BM25 verification complete: "
+            f"{iv_summary.supported} supported, "
+            f"{iv_summary.weakly_supported} weakly supported, "
+            f"{iv_summary.unsupported} unsupported, "
+            f"{iv_summary.unclear} unclear."
+        ),
+    )
+
     # ── 3. Confidence summary ────────────────────────────────────────────
     confidence = compute_confidence_summary(
         claims=validated_claims,
         unresolved_high_impact=unresolved,
         metadata=metadata,
     )
+
+    # Internal verification can cap confidence conservatively.
+    limiting = list(confidence.limiting_factors)
+    if iv_summary.unsupported > 0:
+        limiting.append(
+            f"{iv_summary.unsupported} claim(s) unsupported by internal BM25 verification."
+        )
+    if iv_summary.total_claims > 0 and (
+        (iv_summary.unsupported / iv_summary.total_claims) >= 0.4
+    ):
+        if confidence.overall in {"high", "medium"}:
+            confidence = confidence.model_copy(update={"overall": "low"})
+    elif iv_summary.unsupported > 0 and confidence.overall == "high":
+        confidence = confidence.model_copy(update={"overall": "medium"})
+
+    confidence = confidence.model_copy(update={"limiting_factors": limiting})
     state = state.model_copy(update={"confidence_summary": confidence})
 
     state = append_reasoning_step(
