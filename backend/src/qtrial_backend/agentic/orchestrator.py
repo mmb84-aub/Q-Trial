@@ -30,6 +30,7 @@ from qtrial_backend.agentic.hypothesis_tool_dispatch import (
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
     FinalReportSchema,
+    GroundedFindingsSchema,
     GuardrailReport,
     InsightSynthesisOutput,
     LiteratureRAGReport,
@@ -46,6 +47,13 @@ from qtrial_backend.tools.literature.rag import (
     format_literature_for_agents,
     run_literature_rag,
 )
+from qtrial_backend.agentic.cst_translator import translate_findings_to_cst
+from qtrial_backend.agentic.literature_validator import LiteratureValidatorPipeline
+from qtrial_backend.agentic.synthesis_scorer import (
+    score_synthesis_quality,
+    SYNTHESIS_QUALITY_THRESHOLD,
+)
+from qtrial_backend.agentic.reproducibility import ReproducibilityLogBuilder
 
 console = Console()
 
@@ -448,6 +456,8 @@ def run_agentic_insights(
     analysis_report: str | None = None,
     tool_log: list[dict[str, Any]] | None = None,
     emit: Callable | None = None,
+    # ── new: clinical context ─────────────────────────────────────────────────
+    study_context: str = "",
 ) -> FinalReportSchema:
     """
     Run the full agentic reasoning pipeline.
@@ -465,6 +475,17 @@ def run_agentic_insights(
     """
 
     OUTPUT_DIR.mkdir(exist_ok=True)
+
+    # ── Seed + reproducibility setup ─────────────────────────────────────────
+    import os, numpy as np, hashlib, time as _time
+    _seed = int(os.environ.get("ANALYSIS_SEED", "42"))
+    np.random.seed(_seed)
+    _run_id = f"{provider}_{int(_time.time())}"
+    _repro = ReproducibilityLogBuilder(
+        run_id=_run_id,
+        study_context=study_context,
+        seed=_seed,
+    )
 
     def _emit(event_type: str, stage: str, message: str) -> None:
         """Forward a progress event to the caller without blocking on failure."""
@@ -596,6 +617,7 @@ def run_agentic_insights(
                 unknowns_output=ua_out,
                 prior_analysis_report=analysis_report,
                 tool_log=typed_tool_log,
+                study_context=study_context if study_context else None,
             )
 
         else:
@@ -1032,6 +1054,63 @@ def run_agentic_insights(
     # Use the accumulated metadata (may have been enriched by interactive loop)
     final_metadata = loop_metadata if interactive else metadata
 
+    # ── NEW: CST translation → literature validation → synthesis scoring ──────
+    grounded_findings: GroundedFindingsSchema | None = None
+    synthesis_quality: Any = None
+
+    if study_context:
+        try:
+            console.print(
+                "[bold cyan]► CST Translation:[/bold cyan] "
+                "Translating findings to clinical search terms…"
+            )
+            csts = translate_findings_to_cst(
+                best_insights.key_findings, study_context, provider
+            )
+            _repro.add_csts(csts)
+            _emit("stage_complete", "cst_translation", "Clinical search terms ready")
+
+            console.print(
+                "[bold cyan]► Literature Validation:[/bold cyan] "
+                "Cross-referencing medical literature…"
+            )
+            lit_pipeline = LiteratureValidatorPipeline(provider=provider)
+            grounded_list = lit_pipeline.validate(csts)
+            _repro.add_literature_queries(lit_pipeline.query_records)
+            grounded_findings = GroundedFindingsSchema(findings=grounded_list)
+            _emit("stage_complete", "literature_validation", f"Literature: {len(grounded_list)} findings grounded")
+
+            console.print(
+                "[bold cyan]► Synthesis Scoring:[/bold cyan] "
+                "Scoring synthesis quality…"
+            )
+            synthesis_quality = score_synthesis_quality(best_insights, study_context, provider)
+            if synthesis_quality.score < SYNTHESIS_QUALITY_THRESHOLD:
+                console.print(
+                    f"  [yellow]⚠ Quality score {synthesis_quality.score:.2f} < "
+                    f"threshold {SYNTHESIS_QUALITY_THRESHOLD:.2f} — re-running synthesis…[/yellow]"
+                )
+                best_insights = run_insight_synthesis_agent(
+                    preview, evidence,
+                    collected.get("DataQualityAgent"),
+                    collected.get("ClinicalSemanticsAgent"),
+                    provider,
+                    citations=citations,
+                    unknowns_output=collected.get("UnknownsAgent"),
+                    prior_analysis_report=analysis_report,
+                    tool_log=typed_tool_log,
+                    study_context=study_context,
+                )
+                synthesis_quality.rerun_triggered = True
+                synthesis_quality = score_synthesis_quality(best_insights, study_context, provider)
+                synthesis_quality.rerun_triggered = True
+            _emit("stage_complete", "synthesis_scoring", f"Synthesis quality: {synthesis_quality.score:.2f}")
+        except Exception as exc:
+            console.print(f"  [yellow]⚠ New pipeline steps skipped: {exc}[/yellow]")
+
+    # ── Reproducibility log ───────────────────────────────────────────────────
+    repro_log = _repro.finalise(synthesis_quality_score=synthesis_quality)
+
     report = FinalReportSchema(
         provider=provider,
         model=model_name,
@@ -1050,6 +1129,11 @@ def run_agentic_insights(
         reasoning_state=reasoning_state,
         guardrail_report=guardrail_report,
         literature_report=literature_report,
+        study_context=study_context or None,
+        grounded_findings=grounded_findings,
+        reproducibility_log=repro_log,
+        synthesis_quality_score=synthesis_quality,
+        treatment_columns_excluded=[],
     )
 
     # Persist compact tool_log (large results are truncated)

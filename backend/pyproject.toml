@@ -24,6 +24,10 @@ fastapi = ">=0.115.0"
 uvicorn = {extras = ["standard"], version = "^0.41.0"}
 python-multipart = ">=0.0.9"
 
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0.0"
+hypothesis = {extras = ["pandas"], version = ">=6.100.0"}
+
 [tool.poetry.scripts]
 qtrial = "qtrial_backend.main:app"
 

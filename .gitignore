@@ -49,3 +49,6 @@ Thumbs.db
 backend/outputs/
 frontend/__pycache__/
 .streamlit/
+backend\.hypothesis
+backend/.hypothesis/
+frontend/node_modules/

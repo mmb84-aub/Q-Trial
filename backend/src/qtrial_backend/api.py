@@ -24,6 +24,8 @@ from qtrial_backend.agentic.schemas import MetadataInput
 from qtrial_backend.agent.runner import run_statistical_agent_loop
 from qtrial_backend.providers.gemini_client import set_thread_emit
 from qtrial_backend.report.static import build_static_report
+from qtrial_backend.dataset.treatment_detector import detect_treatment_columns
+from qtrial_backend.report.adl import build_adl
 
 console = Console()
 
@@ -33,10 +35,13 @@ app = FastAPI(
     description="Multi-agent LLM pipeline for clinical trial dataset analysis.",
 )
 
-# Allow Streamlit frontend (localhost:8501) to call the API
+# Allow Streamlit frontend (localhost:8501) and React dev server (localhost:5173)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"],
+    allow_origins=[
+        "http://localhost:8501", "http://127.0.0.1:8501",
+        "http://localhost:5173", "http://127.0.0.1:5173",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -53,6 +58,7 @@ async def run_analysis(
     provider: str = Form("gemini", description="openai | gemini | claude"),
     run_judge: bool = Form(False),
     max_rows: int = Form(25),
+    study_context: str = Form(..., description="Plain-language study description (required)"),
     metadata_json: str | None = Form(
         None,
         description="Optional JSON string matching MetadataInput schema",
@@ -118,6 +124,8 @@ async def run_analysis(
             False,
             analysis_report,
             tool_log,
+            None,
+            study_context,
         )
     except Exception as exc:
         raise HTTPException(
@@ -131,8 +139,9 @@ async def run_analysis(
 async def run_analysis_stream(
     file: UploadFile = File(..., description="CSV or XLSX dataset"),
     provider: str = Form("gemini", description="openai | gemini | claude"),
-    run_judge: bool = Form(True),
+    run_judge: bool = Form(False),
     max_rows: int = Form(25),
+    study_context: str = Form(..., description="Plain-language study description (required)"),
     metadata_json: str | None = Form(
         None,
         description="Optional JSON string matching MetadataInput schema",
@@ -211,6 +220,7 @@ async def run_analysis_stream(
             report = run_agentic_insights(
                 df, provider, max_rows, 30, run_judge, meta, False,
                 analysis_report, tool_log, emit,
+                study_context,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,
@@ -242,3 +252,75 @@ async def run_analysis_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── New endpoints ─────────────────────────────────────────────────────────────
+
+@app.post("/api/detect-treatment")
+async def detect_treatment(
+    file: UploadFile = File(..., description="CSV or XLSX dataset"),
+) -> JSONResponse:
+    """
+    Detect candidate treatment columns in the uploaded dataset using the
+    name-pattern + cardinality heuristic.
+    """
+    content = await file.read()
+    fname = file.filename or ""
+    try:
+        if fname.endswith(".xlsx"):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            df = pd.read_csv(io.BytesIO(content))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+
+    candidates = detect_treatment_columns(df)
+    return JSONResponse(content={"candidate_columns": candidates})
+
+
+@app.post("/api/report/pdf")
+async def generate_pdf(
+    report_json: str = Form(..., description="Serialised FinalReportSchema JSON"),
+    dataset_hash: str = Form("", description="SHA-256 hash of the input dataset"),
+) -> Any:
+    """Generate a PDF report from the serialised FinalReportSchema."""
+    try:
+        from qtrial_backend.report.pdf_generator import generate_pdf_report
+        from qtrial_backend.agentic.schemas import FinalReportSchema as _FRS
+        import json as _json
+        report_obj = _FRS.model_validate(_json.loads(report_json))
+        pdf_bytes = await asyncio.to_thread(generate_pdf_report, report_obj, dataset_hash)
+        from fastapi.responses import Response
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=report.pdf"},
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="PDF generation is temporarily unavailable. Your interactive report is still accessible.",
+        )
+
+
+@app.get("/api/report/reproducibility/{run_id}")
+async def get_reproducibility_log(run_id: str) -> JSONResponse:
+    """Return the reproducibility log for a completed analysis run."""
+    import json as _json
+    from pathlib import Path as _Path
+    log_path = _Path("outputs") / f"{run_id}_reproducibility.json"
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="Reproducibility log not found.")
+    try:
+        data = _json.loads(log_path.read_text(encoding="utf-8"))
+        return JSONResponse(content=data)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read log: {exc}")
+
+
+@app.get("/api/report/adl")
+async def get_adl() -> Any:
+    """Return the Architecture Decision Log as Markdown."""
+    from fastapi.responses import Response
+    adl_text = build_adl()
+    return Response(content=adl_text, media_type="text/markdown")

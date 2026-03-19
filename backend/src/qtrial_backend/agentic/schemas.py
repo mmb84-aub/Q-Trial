@@ -711,3 +711,142 @@ class FinalReportSchema(BaseModel):
             "Semantic Scholar. Articles appear as lit[i] citations in insights."
         ),
     )
+    # New pipeline fields — all optional so existing callers are unaffected
+    study_context: str | None = Field(
+        default=None,
+        description="Plain-language study description provided by the clinician.",
+    )
+    grounded_findings: GroundedFindingsSchema | None = Field(
+        default=None,
+        description="Literature-grounded findings with synthesis outputs.",
+    )
+    reproducibility_log: ReproducibilityLog | None = Field(
+        default=None,
+        description="Full audit log for this analysis run.",
+    )
+    synthesis_quality_score: SynthesisQualityScore | None = Field(
+        default=None,
+        description="Self-assessment score from the synthesis LLM call.",
+    )
+    treatment_columns_excluded: list[str] = Field(
+        default_factory=list,
+        description="Column names excluded as treatment group assignments.",
+    )
+
+
+# ── New schemas: Clinical Search Terms, Evidence Strength, Grounded Findings ──
+
+class ClinicalSearchTerm(BaseModel):
+    """A statistical finding translated into a clinically phrased query string."""
+    source_finding: str
+    term: str
+    study_context_used: str
+    translation_failed: bool = False
+    failure_note: str | None = None
+
+
+class EvidenceStrengthScore(BaseModel):
+    """Composite evidence quality score derived from recency, study type, and sample size."""
+    score: int = Field(..., ge=0, le=100)
+    label: Literal["Strong", "Moderate", "Weak", "Insufficient"]
+    plain_language: str  # e.g. "Strong — based on a 2022 Cochrane meta-analysis of 10,000 patients"
+    year: int | None = None
+    study_type: str  # "meta-analysis" | "RCT" | "cohort" | "case study" | "unknown"
+    sample_size: int | None = None
+
+
+class GroundedFinding(BaseModel):
+    """A single statistical finding with literature grounding and disclosure metadata."""
+    finding_text: str
+    grounding_status: Literal["Supported", "Contradicted", "Novel"]
+    citations: list[LiteratureArticle] = Field(default_factory=list)
+    evidence_strength: EvidenceStrengthScore | None = None
+    novel_statement: str | None = None
+    literature_skipped: bool = False
+    literature_skip_note: str | None = None
+    test_selection_rationale: str | None = None
+    missingness_disclosure: str | None = None
+
+
+# ── New schemas: Research Questions, Synthesis, Missingness ──────────────────
+
+class ResearchQuestion(BaseModel):
+    question: str
+    source_finding: str
+
+
+class ControlVariable(BaseModel):
+    variable: str
+    reason: str
+
+
+class SynthesisOutput(BaseModel):
+    future_trial_hypothesis: str
+    endpoint_improvement_recommendations: list[str] = Field(default_factory=list)
+    recommended_sample_size: str
+    variables_to_control: list[ControlVariable] = Field(default_factory=list)
+    research_questions: list[ResearchQuestion] = Field(default_factory=list)
+
+
+class ExcludedColumn(BaseModel):
+    column: str
+    missingness_rate: float
+    reason: str = "exceeds 50% missingness threshold"
+
+
+class HighMissingnessColumn(BaseModel):
+    column: str
+    missingness_rate: float  # 0.20–0.50
+
+
+class MissingnessDisclosure(BaseModel):
+    column: str
+    missingness_rate: float
+    rows_dropped: int
+    action: Literal["excluded", "high_missingness_section", "listwise_deletion"]
+
+
+class GroundedFindingsSchema(BaseModel):
+    findings: list[GroundedFinding] = Field(default_factory=list)
+    research_questions: list[ResearchQuestion] = Field(default_factory=list)
+    synthesis: SynthesisOutput | None = None
+    excluded_columns: list[ExcludedColumn] = Field(default_factory=list)
+    high_missingness_columns: list[HighMissingnessColumn] = Field(default_factory=list)
+
+
+# ── New schemas: Synthesis Quality, Reproducibility Log ──────────────────────
+
+class SynthesisQualityScore(BaseModel):
+    score: float = Field(..., ge=0.0, le=1.0)
+    rationale: str
+    rerun_triggered: bool = False
+
+
+class LLMCallRecord(BaseModel):
+    call_id: str
+    stage: str  # e.g. "statistical_agent", "cst_translation", "synthesis"
+    model: str
+    temperature: float
+    seed: int | None = None
+    prompt_hash: str   # SHA-256 of the prompt
+    response_hash: str  # SHA-256 of the response
+
+
+class LiteratureQueryRecord(BaseModel):
+    source: Literal["pubmed", "cochrane", "clinicaltrials", "semantic_scholar"]
+    query_string: str
+    results_count: int
+    cached: bool
+    error: str | None = None
+
+
+class ReproducibilityLog(BaseModel):
+    run_id: str
+    timestamp: str  # ISO 8601
+    study_context: str
+    seed: int
+    llm_calls: list[LLMCallRecord] = Field(default_factory=list)
+    literature_queries: list[LiteratureQueryRecord] = Field(default_factory=list)
+    clinical_search_terms: list[ClinicalSearchTerm] = Field(default_factory=list)
+    tool_call_log: list[ToolCallRecord] = Field(default_factory=list)
+    synthesis_quality_score: SynthesisQualityScore | None = None

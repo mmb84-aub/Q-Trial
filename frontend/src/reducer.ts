@@ -1,0 +1,52 @@
+import type { PipelineState, PipelineAction } from "./types";
+
+export const initialState: PipelineState = {
+  stage: "idle",
+  studyContext: "",
+  file: null,
+  outcomeColumn: "",
+  detectedTreatmentColumns: [],
+  confirmedTreatmentColumns: [],
+  progressMessages: [],
+  report: null,
+  errorMessage: null,
+};
+
+export function reducer(state: PipelineState, action: PipelineAction): PipelineState {
+  switch (action.type) {
+    case "SET_CONTEXT":
+      return {
+        ...state,
+        studyContext: action.payload,
+        stage: action.payload.trim() ? "context_entered" : "idle",
+      };
+    case "SET_FILE":
+      return { ...state, file: action.payload };
+    case "SET_OUTCOME_COLUMN":
+      return { ...state, outcomeColumn: action.payload };
+    case "START_UPLOAD":
+      return { ...state, stage: "uploading" };
+    case "TREATMENT_DETECTED":
+      return {
+        ...state,
+        stage: "awaiting_confirmation",
+        detectedTreatmentColumns: action.payload,
+        confirmedTreatmentColumns: action.payload,
+      };
+    case "CONFIRM_TREATMENT":
+      return { ...state, stage: "running", confirmedTreatmentColumns: action.payload };
+    case "PROGRESS":
+      return {
+        ...state,
+        progressMessages: [...state.progressMessages, action.payload],
+      };
+    case "COMPLETE":
+      return { ...state, stage: "complete", report: action.payload };
+    case "ERROR":
+      return { ...state, stage: "error", errorMessage: action.payload };
+    case "RESET":
+      return { ...initialState };
+    default:
+      return state;
+  }
+}
