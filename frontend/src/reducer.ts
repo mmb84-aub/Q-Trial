@@ -5,11 +5,14 @@ export const initialState: PipelineState = {
   studyContext: "",
   file: null,
   outcomeColumn: "",
+  provider: "gemini",
+  model: "",
   detectedTreatmentColumns: [],
   confirmedTreatmentColumns: [],
   progressMessages: [],
   report: null,
   errorMessage: null,
+  retryCount: 0,
 };
 
 export function reducer(state: PipelineState, action: PipelineAction): PipelineState {
@@ -24,6 +27,8 @@ export function reducer(state: PipelineState, action: PipelineAction): PipelineS
       return { ...state, file: action.payload };
     case "SET_OUTCOME_COLUMN":
       return { ...state, outcomeColumn: action.payload };
+    case "SET_PROVIDER":
+      return { ...state, provider: action.payload.provider, model: action.payload.model };
     case "START_UPLOAD":
       return { ...state, stage: "uploading" };
     case "TREATMENT_DETECTED":
@@ -44,6 +49,9 @@ export function reducer(state: PipelineState, action: PipelineAction): PipelineS
       return { ...state, stage: "complete", report: action.payload };
     case "ERROR":
       return { ...state, stage: "error", errorMessage: action.payload };
+    case "RETRY":
+      // Increment retryCount so ProgressStream gets a new key and remounts
+      return { ...state, stage: "running", progressMessages: [], errorMessage: null, retryCount: state.retryCount + 1 };
     case "RESET":
       return { ...initialState };
     default:

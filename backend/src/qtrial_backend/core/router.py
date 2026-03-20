@@ -7,7 +7,7 @@ from qtrial_backend.providers.claude_client import ClaudeClient
 from qtrial_backend.providers.openrouter_client import OpenRouterClient
 
 
-def get_client(provider: ProviderName):
+def get_client(provider: ProviderName, model: str | None = None):
     if provider == "openai":
         return OpenAIClient()
     if provider == "gemini":
@@ -15,5 +15,5 @@ def get_client(provider: ProviderName):
     if provider == "claude":
         return ClaudeClient()
     if provider == "openrouter":
-        return OpenRouterClient()
+        return OpenRouterClient(model=model)
     raise ValueError(f"Unknown provider: {provider}")

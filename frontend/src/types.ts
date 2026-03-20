@@ -120,21 +120,26 @@ export interface PipelineState {
   studyContext: string;
   file: File | null;
   outcomeColumn: string;
+  provider: string;
+  model: string;
   detectedTreatmentColumns: string[];
   confirmedTreatmentColumns: string[];
   progressMessages: string[];
   report: FinalReport | null;
   errorMessage: string | null;
+  retryCount: number;
 }
 
 export type PipelineAction =
   | { type: "SET_CONTEXT"; payload: string }
   | { type: "SET_FILE"; payload: File }
   | { type: "SET_OUTCOME_COLUMN"; payload: string }
+  | { type: "SET_PROVIDER"; payload: { provider: string; model: string } }
   | { type: "START_UPLOAD" }
   | { type: "TREATMENT_DETECTED"; payload: string[] }
   | { type: "CONFIRM_TREATMENT"; payload: string[] }
   | { type: "PROGRESS"; payload: string }
   | { type: "COMPLETE"; payload: FinalReport }
   | { type: "ERROR"; payload: string }
+  | { type: "RETRY" }
   | { type: "RESET" };

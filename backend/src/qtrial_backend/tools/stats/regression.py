@@ -154,10 +154,17 @@ def _fit_cox(params: RegressionParams, df: pd.DataFrame, ctx: AgentContext) -> d
 
     T = pd.to_numeric(sub[params.time_column], errors="coerce")
     sub = sub[T > 0].copy()
+    sub["_event"] = sub["_event"].values  # ensure no index misalignment after filter
 
     cox_df = sub[[params.time_column, "_event"] + params.predictor_columns].rename(
         columns={"_event": "event"}
     )
+
+    # Dummy-encode any categorical predictors
+    non_time_event = [c for c in cox_df.columns if c not in (params.time_column, "event")]
+    cox_df = pd.get_dummies(cox_df, columns=[
+        c for c in non_time_event if cox_df[c].dtype == object or str(cox_df[c].dtype) == "category"
+    ], drop_first=True)
 
     cph = CoxPHFitter()
     cph.fit(cox_df, duration_col=params.time_column, event_col="event")

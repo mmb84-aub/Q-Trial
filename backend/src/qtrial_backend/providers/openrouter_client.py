@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 from openai import OpenAI
@@ -19,16 +20,30 @@ from qtrial_backend.tools.registry import RegisteredTool
 
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# Thread-local model override — set once per pipeline thread so all agents
+# in that thread use the same user-selected model.
+_tl = threading.local()
+
+
+def set_thread_model(model: str | None) -> None:
+    """Set the OpenRouter model for the current thread (None = use env default)."""
+    _tl.model = model
+
+
+def get_thread_model() -> str | None:
+    return getattr(_tl, "model", None)
+
 
 class OpenRouterClient(LLMClient):
-    def __init__(self) -> None:
+    def __init__(self, model: str | None = None) -> None:
         if not settings.openrouter_api_key:
             raise ValueError("OPENROUTER_API_KEY is not set.")
         self.client = OpenAI(
             api_key=settings.openrouter_api_key,
             base_url=_OPENROUTER_BASE_URL,
         )
-        self.model = settings.openrouter_model
+        # Priority: constructor arg > thread-local > env default
+        self.model = model or get_thread_model() or settings.openrouter_model
 
     # ── Legacy single-shot ────────────────────────────────────────────
 
@@ -37,6 +52,7 @@ class OpenRouterClient(LLMClient):
 
         resp = self.client.chat.completions.create(
             model=self.model,
+            max_tokens=settings.openrouter_max_tokens,
             messages=[
                 {"role": "system", "content": req.system_prompt},
                 {
@@ -93,7 +109,11 @@ class OpenRouterClient(LLMClient):
                     }
                 )
 
-        kwargs: dict[str, Any] = {"model": self.model, "messages": oai_messages}
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": oai_messages,
+            "max_tokens": settings.openrouter_max_tokens,
+        }
         if tools:
             kwargs["tools"] = to_openai_tools(tools)
 

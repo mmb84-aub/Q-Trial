@@ -11,9 +11,10 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  async function handleDetect(file: File, outcomeColumn: string) {
+  async function handleDetect(file: File, outcomeColumn: string, provider: string, model: string) {
     dispatch({ type: "SET_FILE", payload: file });
     dispatch({ type: "SET_OUTCOME_COLUMN", payload: outcomeColumn });
+    dispatch({ type: "SET_PROVIDER", payload: { provider, model } });
     dispatch({ type: "START_UPLOAD" });
 
     const form = new FormData();
@@ -35,7 +36,7 @@ export default function App() {
     <ErrorBoundary>
       <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "system-ui, sans-serif" }}>
         {/* Persistent step tracker — hidden on complete/error to give report full width */}
-        {state.stage !== "complete" && (
+        {state.stage !== "complete" && state.stage !== "error" && (
           <StepTracker stage={state.stage} />
         )}
 
@@ -63,40 +64,88 @@ export default function App() {
         {state.stage === "awaiting_confirmation" && (
           <TreatmentConfirmModal
             detected={state.detectedTreatmentColumns}
-            onConfirm={(cols) => dispatch({ type: "CONFIRM_TREATMENT", payload: cols })}
+            onConfirm={(cols) => {
+              dispatch({ type: "CONFIRM_TREATMENT", payload: cols });
+            }}
           />
         )}
 
-        {state.stage === "running" && state.file && (
-          <ProgressStream
-            file={state.file}
-            studyContext={state.studyContext}
-            confirmedTreatmentColumns={state.confirmedTreatmentColumns}
-            progressMessages={state.progressMessages}
-            dispatch={dispatch}
-          />
+        {(state.stage === "running" || state.stage === "error") && state.file && (
+          <div style={{ position: "relative" }}>
+            <ProgressStream
+              key={state.retryCount}
+              file={state.file}
+              studyContext={state.studyContext}
+              confirmedTreatmentColumns={state.confirmedTreatmentColumns}
+              provider={state.provider}
+              model={state.model}
+              progressMessages={state.progressMessages}
+              dispatch={dispatch}
+            />
+
+            {state.stage === "error" && (
+              <div
+                role="alert"
+                style={{
+                  position: "fixed", inset: 0,
+                  background: "rgba(0,0,0,0.85)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  zIndex: 100,
+                }}
+              >
+                <div style={{
+                  background: "#111", border: "1px solid #333", borderRadius: 8,
+                  padding: "2rem 2.5rem", maxWidth: 560, width: "90%",
+                  fontFamily: "monospace",
+                }}>
+                  <p style={{ color: "#f87171", fontWeight: 700, fontSize: "0.85rem", margin: "0 0 0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Analysis failed
+                  </p>
+                  <pre style={{
+                    color: "#e5e7eb", fontSize: "0.85rem", whiteSpace: "pre-wrap",
+                    wordBreak: "break-word", margin: "0 0 1.5rem", lineHeight: 1.6,
+                    background: "transparent", border: "none", padding: 0,
+                  }}>
+                    {state.errorMessage}
+                  </pre>
+                  <div style={{ display: "flex", gap: "0.75rem" }}>
+                    <button
+                      onClick={() => {
+                        dispatch({ type: "RETRY" });
+                      }}
+                      style={{
+                        padding: "0.5rem 1.25rem", background: "#1d4ed8", color: "#fff",
+                        border: "none", borderRadius: 6, cursor: "pointer",
+                        fontWeight: 600, fontSize: "0.85rem", fontFamily: "system-ui, sans-serif",
+                      }}
+                    >
+                      Try again
+                    </button>
+                    <button
+                      onClick={() => dispatch({ type: "RESET" })}
+                      style={{
+                        padding: "0.5rem 1.25rem", background: "none", color: "#9ca3af",
+                        border: "1px solid #374151", borderRadius: 6, cursor: "pointer",
+                        fontSize: "0.85rem", fontFamily: "system-ui, sans-serif",
+                      }}
+                    >
+                      Start over
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {state.stage === "running" && !state.file && (
+          <div style={{ maxWidth: 640, margin: "3rem auto", padding: "0 1.5rem" }}>
+            <p style={{ color: "#dc2626" }}>Error: no file in state. Please start over.</p>
+          </div>
         )}
 
         {state.stage === "complete" && state.report && (
           <InteractiveReport report={state.report} onReset={() => dispatch({ type: "RESET" })} />
-        )}
-
-        {state.stage === "error" && (
-          <div role="alert" style={{ maxWidth: 640, margin: "3rem auto", padding: "0 1.5rem" }}>
-            <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#dc2626", margin: "0 0 0.75rem" }}>
-              Analysis could not be completed
-            </h1>
-            <p style={{ color: "#4b5563", marginBottom: "1.5rem" }}>{state.errorMessage}</p>
-            <button
-              onClick={() => dispatch({ type: "RESET" })}
-              style={{
-                padding: "0.6rem 1.5rem", background: "#1d4ed8", color: "#fff",
-                border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600,
-              }}
-            >
-              Start over
-            </button>
-          </div>
         )}
       </div>
     </ErrorBoundary>

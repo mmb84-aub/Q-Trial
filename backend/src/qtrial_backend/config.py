@@ -27,6 +27,7 @@ class Settings:
 
     openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
+    openrouter_max_tokens: int = int(os.getenv("OPENROUTER_MAX_TOKENS", "4096"))
 
     # Literature / RAG
     ncbi_api_key: str | None = os.getenv("NCBI_API_KEY")

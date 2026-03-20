@@ -52,6 +52,7 @@ def run_statistical_agent_loop(
     provider: ProviderName,
     dataset_name: str,
     emit: Callable | None = None,
+    model: str | None = None,
 ) -> tuple[str, list[dict]]:
     """
     Run the LLM-driven statistical AgentLoop on df.
@@ -67,7 +68,7 @@ def run_statistical_agent_loop(
     import qtrial_backend.tools  # noqa: F401
 
     ctx = AgentContext(dataframe=df, dataset_name=dataset_name)
-    client = get_client(provider)
+    client = get_client(provider, model=model)
     tools = ToolRegistry.all_tools()
 
     console.print(

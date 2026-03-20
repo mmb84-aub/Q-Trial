@@ -172,11 +172,20 @@ class AgentLoop:
                     )
 
                     if self.verbose:
-                        err_flag = "ERROR" if tool_result.is_error else "OK"
-                        console.print(
-                            f"  [dim]Tool: {tc.name}({tc.arguments}) "
-                            f"-> {err_flag}[/dim]"
-                        )
+                        if tool_result.is_error:
+                            try:
+                                err_detail = json.loads(tool_result.content).get("error", tool_result.content)
+                            except Exception:
+                                err_detail = tool_result.content
+                            console.print(
+                                f"  [red]Tool: {tc.name}({tc.arguments}) "
+                                f"-> ERROR: {err_detail}[/red]"
+                            )
+                        else:
+                            console.print(
+                                f"  [dim]Tool: {tc.name}({tc.arguments}) "
+                                f"-> OK[/dim]"
+                            )
 
                 # ── Too many consecutive errors → force conclusion ────
                 if consecutive_errors >= self.max_consecutive_errors:

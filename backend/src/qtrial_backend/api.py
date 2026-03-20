@@ -23,6 +23,7 @@ from qtrial_backend.agentic.orchestrator import run_agentic_insights
 from qtrial_backend.agentic.schemas import MetadataInput
 from qtrial_backend.agent.runner import run_statistical_agent_loop
 from qtrial_backend.providers.gemini_client import set_thread_emit
+from qtrial_backend.providers.openrouter_client import set_thread_model
 from qtrial_backend.report.static import build_static_report
 from qtrial_backend.dataset.treatment_detector import detect_treatment_columns
 from qtrial_backend.report.adl import build_adl
@@ -138,7 +139,8 @@ async def run_analysis(
 @app.post("/api/run/stream")
 async def run_analysis_stream(
     file: UploadFile = File(..., description="CSV or XLSX dataset"),
-    provider: str = Form("gemini", description="openai | gemini | claude"),
+    provider: str = Form("gemini", description="openai | gemini | claude | openrouter"),
+    model: str | None = Form(None, description="Model override (used for openrouter)"),
     run_judge: bool = Form(False),
     max_rows: int = Form(25),
     study_context: str = Form(..., description="Plain-language study description (required)"),
@@ -146,6 +148,7 @@ async def run_analysis_stream(
         None,
         description="Optional JSON string matching MetadataInput schema",
     ),
+    confirmed_treatment_columns: list[str] = Form(default=[]),
 ) -> StreamingResponse:
     """
     Same as /api/run but streams Server-Sent Events so the frontend can show
@@ -184,6 +187,7 @@ async def run_analysis_stream(
 
     def _run_pipeline() -> None:
         set_thread_emit(emit)
+        set_thread_model(model if provider == "openrouter" else None)
         try:
             # ── 1. Deterministic static report ───────────────────────────────
             try:

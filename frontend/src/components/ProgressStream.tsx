@@ -20,12 +20,14 @@ interface Props {
   studyContext: string;
   confirmedTreatmentColumns: string[];
   provider?: string;
+  model?: string;
   progressMessages: string[];
   dispatch: React.Dispatch<PipelineAction>;
 }
 
-export function ProgressStream({ file, studyContext, confirmedTreatmentColumns, provider = "gemini", progressMessages, dispatch }: Props) {
+export function ProgressStream({ file, studyContext, confirmedTreatmentColumns, provider = "gemini", model = "", progressMessages, dispatch }: Props) {
   useEffect(() => {
+    let cancelled = false;
     const controller = new AbortController();
 
     async function stream() {
@@ -33,6 +35,7 @@ export function ProgressStream({ file, studyContext, confirmedTreatmentColumns, 
       formData.append("file", file);
       formData.append("study_context", studyContext);
       formData.append("provider", provider);
+      if (model) formData.append("model", model);
       confirmedTreatmentColumns.forEach((col) => formData.append("confirmed_treatment_columns", col));
 
       let response: Response;
@@ -42,12 +45,14 @@ export function ProgressStream({ file, studyContext, confirmedTreatmentColumns, 
           body: formData,
           signal: controller.signal,
         });
-      } catch {
+      } catch (err) {
+        if (cancelled) return;
         dispatch({ type: "ERROR", payload: "Unable to reach the analysis server. Please try again." });
         return;
       }
 
       if (!response.ok || !response.body) {
+        if (cancelled) return;
         dispatch({ type: "ERROR", payload: "The analysis server returned an unexpected response." });
         return;
       }
@@ -78,7 +83,10 @@ export function ProgressStream({ file, studyContext, confirmedTreatmentColumns, 
     }
 
     stream();
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, []); // intentionally run once on mount
 
   const allStages = Object.keys(STAGE_INFO);

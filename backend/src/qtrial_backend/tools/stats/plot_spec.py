@@ -158,12 +158,12 @@ def plot_spec(params: PlotSpecParams, ctx: AgentContext) -> dict:
 
         T_col, E_col = params.x_column, params.y_column
         tmp = df[[T_col, E_col]].dropna().copy()
+        T_numeric = pd.to_numeric(tmp[T_col], errors="coerce")
+        tmp = tmp[T_numeric > 0].copy()
         if params.event_codes:
             tmp["_ev"] = tmp[E_col].isin(params.event_codes).astype(int)
         else:
             tmp["_ev"] = pd.to_numeric(tmp[E_col], errors="coerce").fillna(0).astype(int)
-        T = pd.to_numeric(tmp[T_col], errors="coerce")
-        tmp = tmp[T > 0]
 
         def _km_data(T_s: pd.Series, E_s: pd.Series, label: str) -> dict:
             kmf = KaplanMeierFitter()
@@ -182,9 +182,12 @@ def plot_spec(params: PlotSpecParams, ctx: AgentContext) -> dict:
             }
 
         if params.group_column:
+            if params.group_column not in df.columns:
+                raise ValueError(f"group_column '{params.group_column}' not found.")
+            # Re-attach group column to tmp for groupby
+            tmp_with_grp = tmp.join(df[[params.group_column]], how="left")
             base["series"] = []
-            for grp, sub in df.groupby(params.group_column):
-                sub_tmp = tmp.loc[sub.index.intersection(tmp.index)]
+            for grp, sub_tmp in tmp_with_grp.groupby(params.group_column):
                 if len(sub_tmp) >= 5:
                     base["series"].append(
                         _km_data(
