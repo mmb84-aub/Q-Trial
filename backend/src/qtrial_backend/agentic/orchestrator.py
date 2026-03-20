@@ -19,14 +19,6 @@ from typing import Any, Callable
 from rich.prompt import Confirm, Prompt
 
 from qtrial_backend.agentic.reasoning import run_reasoning_engine
-from qtrial_backend.agentic.hypothesis_gen import (
-    generate_dynamic_hypotheses,
-    integrate_dynamic_hypotheses,
-)
-from qtrial_backend.agentic.hypothesis_tool_dispatch import (
-    run_tool_dispatch,
-    format_dispatch_results_for_agents,
-)
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
     FinalReportSchema,
@@ -687,9 +679,6 @@ def run_agentic_insights(
         _emit("stage_complete", "judge", f"Judge score: {judge_output.overall_score}/100")
 
     # ── Step vii: closed-loop metadata re-runs ──────────────────────────────
-    insights_after = None
-    judge_after = None
-
     if metadata is not None:
         meta_block = _render_metadata_block(metadata)
         console.print(
@@ -720,45 +709,12 @@ def run_agentic_insights(
                 "    [green]✓ ClinicalSemanticsAgent (updated)[/green]"
             )
 
-        # Always re-run InsightSynthesisAgent with metadata context
-        console.print(
-            "  [yellow]▸ Re-running InsightSynthesisAgent "
-            "with metadata…[/yellow]"
-        )
+        # Metadata re-run: only ClinicalSemanticsAgent is re-run here.
+        # InsightSynthesisAgent runs once at the end with full context.
         unknowns_enriched = dict(unknowns.model_dump())
         unknowns_enriched["__metadata_text__"] = meta_block
-
-        insights_after = run_insight_synthesis_agent(
-            preview,
-            enriched,
-            collected.get("DataQualityAgent"),
-            collected.get("ClinicalSemanticsAgent"),
-            provider,
-            citations=citations,
-            unknowns_output=unknowns_enriched,
-            prior_analysis_report=analysis_report,
-            tool_log=typed_tool_log,
-        )
-        console.print(
-            "    [green]✓ InsightSynthesisAgent (updated)[/green]"
-        )
-
-        # Re-run judge on updated synthesis
-        if run_judge:
-            console.print(
-                "  [yellow]▸ Re-running JudgeAgent (post-metadata)…[/yellow]"
-            )
-            judge_after = run_judge_agent(
-                final_insights=insights_after,
-                evidence=enriched,
-                unknowns=unknowns,
-                provider=provider,
-            )
-            console.print(
-                f"  [green]Judge (after):[/green] "
-                f"{judge_after.overall_score}/100 | "
-                f"Failed claims: {len(judge_after.failed_claims)}"
-            )
+        insights_after = None
+        judge_after = None
 
     # ── Step viii: interactive closed-loop Q&A ────────────────────────────
     loop_metadata: MetadataInput | None = metadata
@@ -768,8 +724,8 @@ def run_agentic_insights(
 
     if interactive:
         # Start from the best state produced so far
-        _start_insights = insights_after if insights_after is not None else final_insights
-        _start_judge = judge_after if judge_after is not None else judge_output
+        _start_insights = final_insights
+        _start_judge = judge_output
         _start_meta = metadata  # may be None if no --metadata file was given
 
         console.print(
@@ -794,13 +750,11 @@ def run_agentic_insights(
         # Propagate loop results so they are used as canonical values below
         if loop_unknowns is not None:
             unknowns = loop_unknowns
-        if loop_insights is not None:
-            insights_after = loop_insights
-            judge_after = loop_judge
 
-    # ── Determine canonical values (latest available) ─────────────────────
-    best_insights = insights_after if insights_after is not None else final_insights
-    best_judge = judge_after if judge_after is not None else judge_output
+    # ── Determine canonical values before final synthesis ─────────────────
+    # InsightSynthesisAgent runs once at the end with full context.
+    best_insights = final_insights
+    best_judge = judge_output
 
     # ── Task 4B: deterministic reasoning engine ──────────────────────────
     console.print(
@@ -825,135 +779,7 @@ def run_agentic_insights(
     )
     _emit("stage_complete", "reasoning", f"Reasoning engine: {len(reasoning_state.claims)} claims validated")
 
-    # ── Task 4C: dynamic hypothesis generation (LLM) ────────────────────
-    hypo_output = None
-    try:
-        console.print(
-            "[bold cyan]► Hypothesis Generator:[/bold cyan] "
-            "Generating dynamic hypotheses…"
-        )
-        hypo_output = generate_dynamic_hypotheses(
-            provider=provider,
-            preview=preview,
-            evidence=evidence,
-            final_insights=best_insights.model_dump(),
-            unknowns=unknowns.model_dump(),
-            valid_citation_keys=reasoning_state.valid_citation_keys,
-            judge_output=best_judge.model_dump() if best_judge else None,
-            metadata=metadata,
-            tool_log=typed_tool_log,
-        )
-        reasoning_state = integrate_dynamic_hypotheses(
-            state=reasoning_state,
-            llm_output=hypo_output,
-            metadata=metadata,
-            unresolved_high_impact=unknowns.unresolved_high_impact,
-        )
-        console.print(
-            f"  [green]✓ Hypotheses:[/green] "
-            f"{len(reasoning_state.hypotheses)} hypotheses, "
-            f"{len(reasoning_state.hidden_questions)} hidden questions, "
-            f"{len(reasoning_state.step_log)} total steps"
-        )
-        _emit("stage_complete", "hypotheses", f"Hypotheses: {len(reasoning_state.hypotheses)} generated")
-        if hypo_output.tool_dispatch_requests:
-            console.print(
-                f"  [dim]  Tool dispatch requests: "
-                f"{len(hypo_output.tool_dispatch_requests)}[/dim]"
-            )
-    except Exception as exc:
-        console.print(
-            f"  [yellow]⚠ Dynamic hypothesis generation skipped: {exc}[/yellow]"
-        )
-
-    # ── Task 4B: hypothesis-driven tool dispatch ──────────────────────────────
-    if hypo_output is not None and hypo_output.tool_dispatch_requests:
-        try:
-            console.print(
-                "[bold cyan]► Tool Dispatch:[/bold cyan] "
-                "Running hypothesis-driven investigations…"
-            )
-            dispatch_results = run_tool_dispatch(
-                hypo_output.tool_dispatch_requests, df
-            )
-            reasoning_state.dispatched_tool_results = dispatch_results
-
-            n_ok = sum(1 for r in dispatch_results if r.error is None)
-            n_err = len(dispatch_results) - n_ok
-            console.print(
-                f"  [green]✓ Dispatch:[/green] {n_ok} tool(s) completed, "
-                f"{n_err} skipped/errored"
-            )
-            _emit("stage_complete", "dispatch", f"Tool dispatch: {n_ok}/{len(dispatch_results)} completed")
-            for r in dispatch_results:
-                status = "✓" if r.error is None else "✗"
-                console.print(
-                    f"    [{status}] [{r.citation_alias}] "
-                    f"{r.tool_called} → h={r.request.hypothesis_id}"
-                )
-
-            if n_ok > 0:
-                dispatch_block = format_dispatch_results_for_agents(dispatch_results)
-                dispatch_context_report = (
-                    (analysis_report + "\n\n" if analysis_report else "")
-                    + dispatch_block
-                )
-
-                # Re-run InsightSynthesisAgent grounded in empirical tool results
-                console.print(
-                    "  [yellow]▸ Re-running InsightSynthesisAgent "
-                    "(grounded in dispatch results)…[/yellow]"
-                )
-                insights_dispatched = run_insight_synthesis_agent(
-                    preview,
-                    evidence,
-                    collected.get("DataQualityAgent"),
-                    collected.get("ClinicalSemanticsAgent"),
-                    provider,
-                    citations=citations,
-                    unknowns_output=collected.get("UnknownsAgent"),
-                    prior_analysis_report=dispatch_context_report,
-                    tool_log=typed_tool_log,
-                )
-                collected["InsightSynthesisAgent"] = insights_dispatched.model_dump()
-                agent_runs.append(
-                    AgentRunRecord(
-                        step_number=len(agent_runs) + 1,
-                        agent="InsightSynthesisAgent (post-dispatch)",
-                        goal="Re-synthesise insights grounded in hypothesis tool results",
-                        output=insights_dispatched.model_dump(),
-                    )
-                )
-                console.print(
-                    "    [green]✓ InsightSynthesisAgent (post-dispatch)[/green]"
-                )
-
-                # Re-run judge on dispatch-grounded synthesis
-                if run_judge:
-                    console.print(
-                        "  [yellow]▸ Re-running JudgeAgent (post-dispatch)…[/yellow]"
-                    )
-                    judge_dispatched = run_judge_agent(
-                        final_insights=insights_dispatched,
-                        evidence=evidence,
-                        unknowns=unknowns,
-                        provider=provider,
-                    )
-                    console.print(
-                        f"  [green]Judge (post-dispatch):[/green] "
-                        f"{judge_dispatched.overall_score}/100 | "
-                        f"Failed claims: {len(judge_dispatched.failed_claims)}"
-                    )
-                    best_insights = insights_dispatched
-                    best_judge = judge_dispatched
-                else:
-                    best_insights = insights_dispatched
-
-        except Exception as exc:
-            console.print(
-                f"  [yellow]⚠ Tool dispatch skipped: {exc}[/yellow]"
-            )
-    # ── Task 6: hypothesis-driven literature RAG ───────────────────────────
+    # ── Literature RAG: hypothesis-grounded paper retrieval ───────────────────
     literature_report: LiteratureRAGReport | None = None
     lit_block: str = ""
 
@@ -986,68 +812,6 @@ def run_agentic_insights(
                         f"({art.year or 'n/d'})"
                     )
                 lit_block = format_literature_for_agents(literature_report)
-
-                # Build combined context: dispatch results + literature
-                existing_report = (
-                    analysis_report or ""
-                )
-                dispatch_str = ""
-                if hypo_output is not None and reasoning_state.dispatched_tool_results:
-                    dispatch_str = format_dispatch_results_for_agents(
-                        reasoning_state.dispatched_tool_results
-                    )
-                parts = [p for p in [existing_report, dispatch_str, lit_block] if p]
-                combined_context = "\n\n".join(parts) if parts else None
-
-                # Final InsightSynthesisAgent grounded in BOTH tool results + literature
-                console.print(
-                    "  [yellow]\u25b8 Re-running InsightSynthesisAgent "
-                    "(grounded in dispatch + literature)\u2026[/yellow]"
-                )
-                insights_lit = run_insight_synthesis_agent(
-                    preview,
-                    evidence,
-                    collected.get("DataQualityAgent"),
-                    collected.get("ClinicalSemanticsAgent"),
-                    provider,
-                    citations=citations,
-                    unknowns_output=collected.get("UnknownsAgent"),
-                    prior_analysis_report=combined_context,
-                    tool_log=typed_tool_log,
-                )
-                collected["InsightSynthesisAgent"] = insights_lit.model_dump()
-                agent_runs.append(
-                    AgentRunRecord(
-                        step_number=len(agent_runs) + 1,
-                        agent="InsightSynthesisAgent (post-literature)",
-                        goal="Re-synthesise insights grounded in tool results + literature",
-                        output=insights_lit.model_dump(),
-                    )
-                )
-                console.print(
-                    "    [green]\u2713 InsightSynthesisAgent (post-literature)[/green]"
-                )
-
-                if run_judge:
-                    console.print(
-                        "  [yellow]\u25b8 Re-running JudgeAgent "
-                        "(post-literature)\u2026[/yellow]"
-                    )
-                    judge_lit = run_judge_agent(
-                        final_insights=insights_lit,
-                        evidence=evidence,
-                        unknowns=unknowns,
-                        provider=provider,
-                    )
-                    console.print(
-                        f"  [green]Judge (post-literature):[/green] "
-                        f"{judge_lit.overall_score}/100 | "
-                        f"Failed claims: {len(judge_lit.failed_claims)}"
-                    )
-                    best_insights = insights_lit
-                    best_judge = judge_lit
-                else:
-                    best_insights = insights_lit
             else:
                 console.print(
                     "  [yellow]\u26a0 Literature RAG: no results returned "
@@ -1057,6 +821,40 @@ def run_agentic_insights(
             console.print(
                 f"  [yellow]\u26a0 Literature RAG skipped: {exc}[/yellow]"
             )
+
+    # ── Single final InsightSynthesisAgent call (full context) ───────────────
+    # Combines: static analysis report + literature block + study_context
+    parts = [p for p in [analysis_report, lit_block] if p]
+    combined_context = "\n\n".join(parts) if parts else None
+
+    console.print(
+        "  [yellow]\u25b8 Running InsightSynthesisAgent "
+        "(full context: analysis + literature)\u2026[/yellow]"
+    )
+    insights_final = run_insight_synthesis_agent(
+        preview,
+        evidence,
+        collected.get("DataQualityAgent"),
+        collected.get("ClinicalSemanticsAgent"),
+        provider,
+        citations=citations,
+        unknowns_output=collected.get("UnknownsAgent"),
+        prior_analysis_report=combined_context,
+        tool_log=typed_tool_log,
+        study_context=study_context if study_context else None,
+    )
+    collected["InsightSynthesisAgent"] = insights_final.model_dump()
+    agent_runs.append(
+        AgentRunRecord(
+            step_number=len(agent_runs) + 1,
+            agent="InsightSynthesisAgent (final)",
+            goal="Synthesise all insights with full context: analysis + literature",
+            output=insights_final.model_dump(),
+        )
+    )
+    best_insights = insights_final
+    console.print("    [green]\u2713 InsightSynthesisAgent (final)[/green]")
+    _emit("stage_complete", "InsightSynthesisAgent", "Insight synthesis complete")
     # Use the accumulated metadata (may have been enriched by interactive loop)
     final_metadata = loop_metadata if interactive else metadata
 
@@ -1126,10 +924,10 @@ def run_agentic_insights(
         final_insights=best_insights,
         judge=best_judge,
         metadata_used=final_metadata,
-        final_insights_before=final_insights if metadata is not None else None,
-        final_insights_after=insights_after,
-        judge_before=judge_output if metadata is not None else None,
-        judge_after=judge_after,
+        final_insights_before=None,
+        final_insights_after=None,
+        judge_before=None,
+        judge_after=None,
         prior_analysis_report=analysis_report,
         tool_log=typed_tool_log,
         reasoning_state=reasoning_state,

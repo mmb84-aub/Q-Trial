@@ -506,6 +506,7 @@ _IS_SYSTEM = textwrap.dedent("""\
 """)
 
 _IS_USER = textwrap.dedent("""\
+    {study_context}
     Synthesise final insights from all prior analysis.
 
     Required JSON schema:
@@ -566,11 +567,16 @@ def run_insight_synthesis_agent(
     unknowns_output: dict | None = None,
     prior_analysis_report: str | None = None,
     tool_log: list[ToolCallRecord] | None = None,
+    study_context: str | None = None,
 ) -> InsightSynthesisOutput:
     prior_block = _build_prior_analysis_block(prior_analysis_report, tool_log)
     citation_block = _build_citation_block(citations or {})
     tool_log_citations = _build_tool_log_citation_hints(tool_log)
+    study_context_line = (
+        f"STUDY CONTEXT: {study_context.strip()}\n" if study_context else ""
+    )
     user = _IS_USER.format(
+        study_context=study_context_line,
         citations=citation_block,
         tool_log_citations=tool_log_citations,
         prior_analysis_block=prior_block,
