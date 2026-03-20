@@ -209,12 +209,18 @@ async def run_analysis_stream(
             # ── 2. LLM-driven statistical agent loop ─────────────────────────
             try:
                 loop_report, tool_log = run_statistical_agent_loop(
-                    df, provider, dataset_name, emit=emit
+                    df, provider, dataset_name, emit=emit, model=model if provider == "openrouter" else None
                 )
             except Exception as exc:
                 console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
                 console.print(traceback.format_exc())
                 loop_report, tool_log = None, None
+                # Non-fatal — emit a warning so the frontend can show a toast
+                # without blocking the rest of the pipeline
+                loop.call_soon_threadsafe(
+                    aq.put_nowait,
+                    {"type": "warning", "message": str(exc)},
+                )
 
             # ── 3. Combine static + loop report for the reasoning pipeline ───
             parts = [p for p in [static_report, loop_report] if p]

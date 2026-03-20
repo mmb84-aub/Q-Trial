@@ -67,6 +67,8 @@ export function ProgressStream({ file, studyContext, confirmedTreatmentColumns, 
           };
           if (data.type === "stage_complete" && data.stage) {
             dispatch({ type: "PROGRESS", payload: data.stage });
+          } else if (data.type === "warning" && data.message) {
+            dispatch({ type: "WARNING", payload: data.message });
           } else if (data.type === "complete" && data.data) {
             dispatch({ type: "COMPLETE", payload: data.data });
           } else if (data.type === "error") {

@@ -125,6 +125,7 @@ export interface PipelineState {
   detectedTreatmentColumns: string[];
   confirmedTreatmentColumns: string[];
   progressMessages: string[];
+  warnings: string[];
   report: FinalReport | null;
   errorMessage: string | null;
   retryCount: number;
@@ -139,6 +140,8 @@ export type PipelineAction =
   | { type: "TREATMENT_DETECTED"; payload: string[] }
   | { type: "CONFIRM_TREATMENT"; payload: string[] }
   | { type: "PROGRESS"; payload: string }
+  | { type: "WARNING"; payload: string }
+  | { type: "DISMISS_WARNING"; payload: number }
   | { type: "COMPLETE"; payload: FinalReport }
   | { type: "ERROR"; payload: string }
   | { type: "RETRY" }

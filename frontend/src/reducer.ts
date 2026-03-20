@@ -10,6 +10,7 @@ export const initialState: PipelineState = {
   detectedTreatmentColumns: [],
   confirmedTreatmentColumns: [],
   progressMessages: [],
+  warnings: [],
   report: null,
   errorMessage: null,
   retryCount: 0,
@@ -45,6 +46,10 @@ export function reducer(state: PipelineState, action: PipelineAction): PipelineS
         ...state,
         progressMessages: [...state.progressMessages, action.payload],
       };
+    case "WARNING":
+      return { ...state, warnings: [...state.warnings, action.payload] };
+    case "DISMISS_WARNING":
+      return { ...state, warnings: state.warnings.filter((_, i) => i !== action.payload) };
     case "COMPLETE":
       return { ...state, stage: "complete", report: action.payload };
     case "ERROR":

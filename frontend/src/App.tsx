@@ -7,6 +7,7 @@ import { TreatmentConfirmModal } from "./components/TreatmentConfirmModal";
 import { ProgressStream } from "./components/ProgressStream";
 import { InteractiveReport } from "./components/report/InteractiveReport";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ToastStack } from "./components/ToastStack";
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -147,6 +148,9 @@ export default function App() {
         {state.stage === "complete" && state.report && (
           <InteractiveReport report={state.report} onReset={() => dispatch({ type: "RESET" })} />
         )}
+
+        {/* Non-fatal warnings — toast stack, always on top, never blocks the pipeline */}
+        <ToastStack warnings={state.warnings} dispatch={dispatch} />
       </div>
     </ErrorBoundary>
   );
