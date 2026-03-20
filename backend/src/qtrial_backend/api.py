@@ -11,6 +11,7 @@ import io
 import json
 import threading
 import traceback
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -23,12 +24,36 @@ from qtrial_backend.agentic.orchestrator import run_agentic_insights
 from qtrial_backend.agentic.schemas import MetadataInput
 from qtrial_backend.agent.runner import run_statistical_agent_loop
 from qtrial_backend.providers.gemini_client import set_thread_emit
-from qtrial_backend.providers.openrouter_client import set_thread_model
+from qtrial_backend.providers.openrouter_client import set_thread_model as set_openrouter_model
+from qtrial_backend.providers.bedrock_client import set_thread_model as set_bedrock_model
 from qtrial_backend.report.static import build_static_report
 from qtrial_backend.dataset.treatment_detector import detect_treatment_columns
 from qtrial_backend.report.adl import build_adl
 
 console = Console()
+
+# ── Data dictionary sidecar loader ───────────────────────────────────────────
+
+_DATA_DIR = Path(__file__).parent / "data"
+
+
+def _load_column_dict(dataset_name: str) -> dict[str, str] | None:
+    """
+    Look for a sidecar JSON data dictionary matching the dataset name.
+    Tries <dataset_name>_dict.json and <dataset_name>.dict.json in the
+    bundled data/ directory.  Returns None when not found.
+    """
+    candidates = [
+        _DATA_DIR / f"{dataset_name}_dict.json",
+        _DATA_DIR / f"{dataset_name}.dict.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+    return None
 
 app = FastAPI(
     title="Q-Trial Statistical Reasoning Engine",
@@ -94,6 +119,7 @@ async def run_analysis(
 
     # ── Run static statistical report first (deterministic, no LLM) ─────────
     dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
+    column_dict = _load_column_dict(dataset_name)
     try:
         static_report = await asyncio.to_thread(build_static_report, df, dataset_name)
     except Exception:
@@ -127,6 +153,7 @@ async def run_analysis(
             tool_log,
             None,
             study_context,
+            column_dict,
         )
     except Exception as exc:
         raise HTTPException(
@@ -149,6 +176,7 @@ async def run_analysis_stream(
         description="Optional JSON string matching MetadataInput schema",
     ),
     confirmed_treatment_columns: list[str] = Form(default=[]),
+    dict_file: UploadFile | None = File(None, description="Optional JSON column dictionary"),
 ) -> StreamingResponse:
     """
     Same as /api/run but streams Server-Sent Events so the frontend can show
@@ -182,12 +210,24 @@ async def run_analysis_stream(
     aq: asyncio.Queue = asyncio.Queue()
     dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
 
+    # Uploaded dict takes priority over bundled sidecar
+    column_dict: dict[str, str] | None = None
+    if dict_file is not None:
+        try:
+            raw_dict = await dict_file.read()
+            column_dict = json.loads(raw_dict.decode("utf-8"))
+        except Exception:
+            column_dict = None
+    if column_dict is None:
+        column_dict = _load_column_dict(dataset_name)
+
     def emit(event: dict) -> None:
         loop.call_soon_threadsafe(aq.put_nowait, event)
 
     def _run_pipeline() -> None:
         set_thread_emit(emit)
-        set_thread_model(model if provider == "openrouter" else None)
+        set_openrouter_model(model if provider == "openrouter" else None)
+        set_bedrock_model(model if provider == "bedrock" else None)
         try:
             # ── 1. Deterministic static report ───────────────────────────────
             try:
@@ -209,7 +249,7 @@ async def run_analysis_stream(
             # ── 2. LLM-driven statistical agent loop ─────────────────────────
             try:
                 loop_report, tool_log = run_statistical_agent_loop(
-                    df, provider, dataset_name, emit=emit, model=model if provider == "openrouter" else None
+                    df, provider, dataset_name, emit=emit, model=model if provider in ("openrouter", "bedrock") else None
                 )
             except Exception as exc:
                 console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
@@ -230,7 +270,7 @@ async def run_analysis_stream(
             report = run_agentic_insights(
                 df, provider, max_rows, 30, run_judge, meta, False,
                 analysis_report, tool_log, emit,
-                study_context,
+                study_context, column_dict,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

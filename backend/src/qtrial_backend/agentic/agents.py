@@ -211,6 +211,7 @@ _CS_USER = textwrap.dedent("""\
     do NOT use the phrase "prognostic factor". Instead use
     "association signal pending status definition" in rationale and trial_design_signals.
 
+    {column_dict_block}
     Required JSON schema:
     {{
       "column_roles": [
@@ -246,8 +247,23 @@ def run_clinical_semantics_agent(
     tool_log: list[ToolCallRecord] | None = None,
 ) -> ClinicalSemanticsOutput:
     prior_block = _build_prior_analysis_block(prior_analysis_report, tool_log)
+
+    # Inject data dictionary if present in evidence
+    column_dict: dict | None = evidence.get("__column_dict__")
+    if column_dict:
+        dict_lines = "\n".join(f"  {col}: {desc}" for col, desc in column_dict.items())
+        column_dict_block = (
+            "AUTHORITATIVE COLUMN DICTIONARY (use these definitions directly — "
+            "do NOT infer meanings from column names alone):\n"
+            + dict_lines
+            + "\n\n"
+        )
+    else:
+        column_dict_block = ""
+
     user = _CS_USER.format(
         goal=step.goal,
+        column_dict_block=column_dict_block,
         prior_analysis_block=prior_block,
         preview=json.dumps(preview, indent=2, ensure_ascii=False),
         evidence=json.dumps(evidence, indent=2, ensure_ascii=False),

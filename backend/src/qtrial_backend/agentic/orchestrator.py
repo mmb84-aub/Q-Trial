@@ -458,6 +458,8 @@ def run_agentic_insights(
     emit: Callable | None = None,
     # ── new: clinical context ─────────────────────────────────────────────────
     study_context: str = "",
+    # ── new: data dictionary (column name → description) ─────────────────────
+    column_dict: dict[str, str] | None = None,
 ) -> FinalReportSchema:
     """
     Run the full agentic reasoning pipeline.
@@ -547,6 +549,10 @@ def run_agentic_insights(
     # Attach metadata as a top-level evidence key so all agents see it
     if metadata is not None:
         evidence["__user_metadata__"] = metadata.model_dump(exclude_none=True)
+
+    # Attach data dictionary so ClinicalSemanticsAgent can use authoritative definitions
+    if column_dict:
+        evidence["__column_dict__"] = column_dict
 
     # Attach upstream context markers so planner/evidence are aware
     if analysis_report is not None:

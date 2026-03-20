@@ -136,7 +136,7 @@ class RankedUnknown(BaseModel):
 class ExplicitAssumption(BaseModel):
     assumption: str
     basis: str
-    risk_if_wrong: Literal["high", "medium", "low"]
+    risk_if_wrong: Literal["high", "medium", "low"] = "medium"
 
 
 class RequiredDocument(BaseModel):
@@ -148,8 +148,8 @@ class RequiredDocument(BaseModel):
 class UnknownsOutput(BaseModel):
     ranked_unknowns: list[RankedUnknown]
     explicit_assumptions: list[ExplicitAssumption]
-    required_documents: list[RequiredDocument]
-    summary: str
+    required_documents: list[RequiredDocument] = Field(default_factory=list)
+    summary: str = ""
     # Filled by the orchestrator after comparing unknowns to metadata answers
     unresolved_high_impact: list[str] = Field(
         default_factory=list,

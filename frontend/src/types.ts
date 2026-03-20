@@ -119,6 +119,7 @@ export interface PipelineState {
   stage: PipelineStage;
   studyContext: string;
   file: File | null;
+  dictFile: File | null;
   outcomeColumn: string;
   provider: string;
   model: string;
@@ -134,6 +135,7 @@ export interface PipelineState {
 export type PipelineAction =
   | { type: "SET_CONTEXT"; payload: string }
   | { type: "SET_FILE"; payload: File }
+  | { type: "SET_DICT_FILE"; payload: File | null }
   | { type: "SET_OUTCOME_COLUMN"; payload: string }
   | { type: "SET_PROVIDER"; payload: { provider: string; model: string } }
   | { type: "START_UPLOAD" }

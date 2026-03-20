@@ -29,6 +29,14 @@ class Settings:
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
     openrouter_max_tokens: int = int(os.getenv("OPENROUTER_MAX_TOKENS", "4096"))
 
+    # AWS Bedrock
+    aws_access_key_id: str | None = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret_access_key: str | None = os.getenv("AWS_SECRET_ACCESS_KEY")
+    aws_region: str = os.getenv("AWS_REGION", "us-east-1")
+    aws_profile: str | None = os.getenv("AWS_PROFILE")
+    bedrock_model: str = os.getenv("AWS_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    bedrock_max_tokens: int = int(os.getenv("AWS_BEDROCK_MAX_TOKENS", "4096"))
+
     # Literature / RAG
     ncbi_api_key: str | None = os.getenv("NCBI_API_KEY")
     s2_api_key: str | None = os.getenv("S2_API_KEY")

@@ -15,35 +15,50 @@ const OPENROUTER_MODELS = [
 
 const PROVIDERS = [
   { id: "gemini",      label: "Gemini (direct)" },
+  { id: "bedrock",     label: "AWS Bedrock" },
   { id: "openrouter",  label: "OpenRouter" },
   { id: "openai",      label: "OpenAI (direct)" },
   { id: "claude",      label: "Claude (direct)" },
 ];
 
+const BEDROCK_MODELS = [
+  { id: "anthropic.claude-sonnet-4-5-20250929-v1:0", label: "Claude Sonnet 4.5 (recommended)" },
+  { id: "anthropic.claude-haiku-4-5-20251001-v1:0",  label: "Claude Haiku 4.5 (fast + cheap)" },
+  { id: "amazon.nova-pro-v1:0",                      label: "Amazon Nova Pro" },
+  { id: "amazon.nova-lite-v1:0",                     label: "Amazon Nova Lite (cheapest)" },
+  { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", label: "Claude 3.5 Sonnet v2 (legacy)" },
+  { id: "custom",                                    label: "Custom model / profile ID…" },
+];
+
 interface Props {
   studyContext: string;
-  onDetect: (file: File, outcomeColumn: string, provider: string, model: string) => void;
+  onDetect: (file: File, dictFile: File | null, outcomeColumn: string, provider: string, model: string) => void;
 }
 
 export function UploadForm({ studyContext, onDetect }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [dictFile, setDictFile] = useState<File | null>(null);
   const [outcomeColumn, setOutcomeColumn] = useState("");
   const [provider, setProvider] = useState("gemini");
   const [orModel, setOrModel] = useState(OPENROUTER_MODELS[0].id);
+  const [bedrockModel, setBedrockModel] = useState(BEDROCK_MODELS[0].id);
   const [customModel, setCustomModel] = useState("");
 
   function resolvedModel(): string {
-    if (provider !== "openrouter") return "";
-    return orModel === "custom" ? customModel.trim() : orModel;
+    if (provider === "openrouter") return orModel === "custom" ? customModel.trim() : orModel;
+    if (provider === "bedrock") return bedrockModel === "custom" ? customModel.trim() : bedrockModel;
+    return "";
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (file) onDetect(file, outcomeColumn, provider, resolvedModel());
+    if (file) onDetect(file, dictFile, outcomeColumn, provider, resolvedModel());
   }
 
-  const canSubmit = file && (provider !== "openrouter" || (orModel !== "custom" || customModel.trim()));
+  const needsCustom = (provider === "openrouter" && orModel === "custom") ||
+                      (provider === "bedrock" && bedrockModel === "custom");
+  const canSubmit = file && (!needsCustom || customModel.trim());
 
   return (
     <div style={{ maxWidth: 640, margin: "3rem auto", padding: "0 1.5rem" }}>
@@ -83,6 +98,28 @@ export function UploadForm({ studyContext, onDetect }: Props) {
           />
           <p style={{ fontSize: "0.8rem", color: "#9ca3af", margin: "0.3rem 0 0" }}>
             CSV or XLSX, any size.
+          </p>
+        </div>
+
+        {/* Data dictionary */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <label htmlFor="dict-file" style={{ fontWeight: 600, display: "block", marginBottom: "0.4rem" }}>
+            Column dictionary <span style={{ fontWeight: 400, color: "#6b7280" }}>(optional)</span>
+          </label>
+          <input
+            id="dict-file"
+            type="file"
+            accept=".json"
+            onChange={(e) => setDictFile(e.target.files?.[0] ?? null)}
+            style={{ fontSize: "0.95rem" }}
+          />
+          <p style={{ fontSize: "0.8rem", color: "#9ca3af", margin: "0.3rem 0 0" }}>
+            JSON file mapping column names to descriptions, e.g.{" "}
+            <code style={{ fontSize: "0.75rem" }}>{`{"status": "0=alive, 1=transplant, 2=dead"}`}</code>.
+            Helps the agent interpret columns accurately.
+            {dictFile && (
+              <span style={{ color: "#16a34a", marginLeft: "0.5rem" }}>✓ {dictFile.name}</span>
+            )}
           </p>
         </div>
 
@@ -167,6 +204,47 @@ export function UploadForm({ studyContext, onDetect }: Props) {
               <a href="https://openrouter.ai/models" target="_blank" rel="noreferrer" style={{ color: "#6b7280" }}>
                 openrouter.ai/models
               </a>
+            </p>
+          </div>
+        )}
+
+        {/* AWS Bedrock model picker */}
+        {provider === "bedrock" && (
+          <div style={{ marginBottom: "1.25rem" }}>
+            <label htmlFor="bedrock-model-select" style={{ fontWeight: 600, display: "block", marginBottom: "0.4rem" }}>
+              Model
+            </label>
+            <select
+              id="bedrock-model-select"
+              value={bedrockModel}
+              onChange={(e) => setBedrockModel(e.target.value)}
+              style={{
+                padding: "0.5rem 0.75rem", width: "100%", fontSize: "0.95rem",
+                border: "1px solid #d1d5db", borderRadius: 6, background: "#fff",
+                boxSizing: "border-box",
+              }}
+            >
+              {BEDROCK_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+
+            {bedrockModel === "custom" && (
+              <input
+                type="text"
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                placeholder="e.g. anthropic.claude-3-haiku-20240307-v1:0"
+                style={{
+                  marginTop: "0.5rem",
+                  padding: "0.5rem 0.75rem", width: "100%", fontSize: "0.95rem",
+                  border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box",
+                }}
+              />
+            )}
+            <p style={{ fontSize: "0.8rem", color: "#9ca3af", margin: "0.3rem 0 0" }}>
+              Requires <code>AWS_ACCESS_KEY_ID</code> + <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>,
+              and the model enabled in your Bedrock console.
             </p>
           </div>
         )}
