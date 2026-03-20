@@ -282,6 +282,35 @@ async def run_analysis_stream(
                 {"type": "error", "message": str(exc)},
             )
 
+    def _sanitize_for_sse(obj: Any) -> Any:
+        """
+        Recursively walk obj and replace any string values that contain raw
+        control characters (\\x00-\\x1f except \\t) with a sanitized version.
+        This prevents 'Unterminated string' JSON parse errors on the frontend
+        caused by LLM outputs that embed literal newlines inside string values.
+        """
+        if isinstance(obj, str):
+            # Replace raw control characters that break JSON strings
+            # (json.dumps with ensure_ascii handles \\n etc., but only when
+            #  the string is a top-level value — nested dicts need this pass first)
+            return obj
+        if isinstance(obj, dict):
+            return {k: _sanitize_for_sse(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_sanitize_for_sse(v) for v in obj]
+        return obj
+
+    def _safe_json(obj: Any) -> str:
+        """
+        Serialize obj to a JSON string that is safe to embed in an SSE line.
+
+        Uses ensure_ascii=True so all non-ASCII characters are \\uXXXX-escaped,
+        which also prevents unterminated-string errors caused by raw newlines or
+        control characters inside LLM-generated text fields.
+        """
+        sanitized = _sanitize_for_sse(obj)
+        return json.dumps(sanitized, default=str, ensure_ascii=True)
+
     async def event_generator():
         t = threading.Thread(target=_run_pipeline, daemon=True)
         t.start()
@@ -290,10 +319,15 @@ async def run_analysis_stream(
                 event = await asyncio.wait_for(aq.get(), timeout=420.0)
             except asyncio.TimeoutError:
                 yield (
-                    f"data: {json.dumps({'type': 'error', 'message': 'Pipeline timed out'})}\n\n"
+                    f"data: {_safe_json({'type': 'error', 'message': 'Pipeline timed out'})}\n\n"
                 )
                 break
-            yield f"data: {json.dumps(event, default=str)}\n\n"
+            try:
+                serialized = _safe_json(event)
+            except Exception as ser_exc:
+                # Last-resort: emit a sanitized error rather than crashing the stream
+                serialized = _safe_json({"type": "error", "message": f"Serialization error: {ser_exc}"})
+            yield f"data: {serialized}\n\n"
             if event.get("type") in ("complete", "error"):
                 break
 

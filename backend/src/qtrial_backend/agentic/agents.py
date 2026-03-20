@@ -28,6 +28,59 @@ def _strip_fences(text: str) -> str:
     return text
 
 
+def _repair_truncated_json(raw: str) -> str:
+    """
+    Best-effort repair of a truncated JSON string produced by a token-limited LLM.
+
+    Handles the most common truncation patterns:
+    - Unterminated string value (closes the string, then closes open containers)
+    - Truncated mid-object or mid-array (closes open containers)
+
+    Returns the repaired string, or the original if repair is not possible.
+    """
+    text = raw.rstrip()
+    if not text:
+        return text
+
+    # Track open containers
+    stack: list[str] = []
+    in_string = False
+    escape_next = False
+
+    for ch in text:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ("{", "["):
+            stack.append("}" if ch == "{" else "]")
+        elif ch in ("}", "]"):
+            if stack and stack[-1] == ch:
+                stack.pop()
+
+    # If we ended inside a string, close it first
+    suffix = ""
+    if in_string:
+        suffix += '"'
+
+    # Remove trailing comma before closing (common truncation artifact)
+    combined = text + suffix
+    combined = combined.rstrip().rstrip(",")
+
+    # Close all open containers in reverse order
+    for closer in reversed(stack):
+        combined += closer
+
+    return combined
+
+
 def _call_llm_for_json(
     provider: ProviderName,
     system: str,
@@ -44,26 +97,44 @@ def _call_llm_for_json(
     try:
         data = json.loads(raw)
         return schema_class.model_validate(data)
+    except json.JSONDecodeError:
+        # Try repairing truncated JSON before giving up / retrying
+        try:
+            repaired = _repair_truncated_json(raw)
+            data = json.loads(repaired)
+            return schema_class.model_validate(data)
+        except Exception:
+            pass
+        # Fall through to retry path
+        exc_for_retry: Exception = ValueError("Invalid JSON (truncated or malformed)")
     except Exception as exc:
-        if not retry:
-            raise ValueError(
-                f"{schema_class.__name__} returned invalid JSON after retry.\n"
-                f"Raw:\n{raw}\nError: {exc}"
-            ) from exc
+        exc_for_retry = exc
 
-        fix_req = LLMRequest(
-            system_prompt=system,
-            user_prompt=(
-                "Your previous response was not valid JSON matching the required schema.\n"
-                f"Error: {exc}\n\n"
-                f"Previous response:\n{raw}\n\n"
-                "Fix it and return ONLY valid JSON. No markdown, no explanation."
-            ),
-            payload={},
-        )
-        fix_resp = client.generate(fix_req)
-        fixed_raw = _strip_fences(fix_resp.text)
+    if not retry:
+        raise ValueError(
+            f"{schema_class.__name__} returned invalid JSON after retry.\n"
+            f"Raw (first 500 chars):\n{raw[:500]}\nError: {exc_for_retry}"
+        ) from exc_for_retry
+
+    fix_req = LLMRequest(
+        system_prompt=system,
+        user_prompt=(
+            "Your previous response was not valid JSON matching the required schema.\n"
+            f"Error: {exc_for_retry}\n\n"
+            f"Previous response (first 500 chars):\n{raw[:500]}\n\n"
+            "Fix it and return ONLY valid JSON. No markdown, no explanation."
+        ),
+        payload={},
+    )
+    fix_resp = client.generate(fix_req)
+    fixed_raw = _strip_fences(fix_resp.text)
+    try:
         data = json.loads(fixed_raw)
+        return schema_class.model_validate(data)
+    except json.JSONDecodeError:
+        # One last attempt: repair the retry response too
+        repaired = _repair_truncated_json(fixed_raw)
+        data = json.loads(repaired)
         return schema_class.model_validate(data)
 
 

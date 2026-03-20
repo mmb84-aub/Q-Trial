@@ -263,7 +263,11 @@ def call_planner(
         )
         fix_resp = client.generate(fix_req)
         fixed_raw = _strip_fences(fix_resp.text)
-        data = json.loads(fixed_raw)
+        try:
+            data = json.loads(fixed_raw)
+        except json.JSONDecodeError:
+            from qtrial_backend.agentic.agents import _repair_truncated_json
+            data = json.loads(_repair_truncated_json(fixed_raw))
         plan = PlanSchema.model_validate(data)
         _validate_inputs_used(plan, allowed_keys)
         return _ensure_agent_order(plan)

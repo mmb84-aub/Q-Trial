@@ -93,7 +93,11 @@ export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmen
     };
   }, []); // intentionally run once on mount
 
-  const allStages = Object.keys(STAGE_INFO);
+  // When a column dictionary is provided the agent still runs internally,
+  // but the user already knows what the columns mean — hide that step.
+  const allStages = Object.keys(STAGE_INFO).filter(
+    (s) => !(s === "ClinicalSemanticsAgent" && dictFile)
+  );
   const doneSet = new Set(progressMessages);
   // The "current" stage is the first one not yet done
   const currentIdx = allStages.findIndex((s) => !doneSet.has(s));

@@ -135,20 +135,31 @@ def run_judge_agent(
         data = json.loads(raw)
         return JudgeOutput.model_validate(data)
     except Exception as exc:
+        # Try repairing truncated JSON first
+        try:
+            from qtrial_backend.agentic.agents import _repair_truncated_json
+            data = json.loads(_repair_truncated_json(raw))
+            return JudgeOutput.model_validate(data)
+        except Exception:
+            pass
         # Retry once with an explicit correction prompt
         try:
             fix_req = LLMRequest(
                 system_prompt=_JUDGE_SYSTEM,
                 user_prompt=(
                     "Your previous response was not valid JSON matching the required schema.\n"
-                    f"Error: {exc}\n\nPrevious response:\n{raw}\n\n"
+                    f"Error: {exc}\n\nPrevious response (first 500 chars):\n{raw[:500]}\n\n"
                     "Fix it and return ONLY valid JSON. No markdown, no explanation."
                 ),
                 payload={},
             )
             fix_resp = client.generate(fix_req)
             fixed_raw = _strip_fences(fix_resp.text)
-            data = json.loads(fixed_raw)
+            try:
+                data = json.loads(fixed_raw)
+            except json.JSONDecodeError:
+                from qtrial_backend.agentic.agents import _repair_truncated_json
+                data = json.loads(_repair_truncated_json(fixed_raw))
             return JudgeOutput.model_validate(data)
         except Exception as exc2:
             return JudgeOutput(
