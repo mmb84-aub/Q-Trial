@@ -766,6 +766,7 @@ class GroundedFinding(BaseModel):
     literature_skip_note: str | None = None
     test_selection_rationale: str | None = None
     missingness_disclosure: str | None = None
+    confidence_warning: str | list[str] | None = None
 
 
 # ── New schemas: Research Questions, Synthesis, Missingness ──────────────────
