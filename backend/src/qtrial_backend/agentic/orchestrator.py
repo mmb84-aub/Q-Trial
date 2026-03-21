@@ -34,6 +34,8 @@ from qtrial_backend.agentic.schemas import (
     LiteratureRAGReport,
     MetadataInput,
     MissingnessDisclosure,
+    ResearchQuestion,
+    SynthesisOutput,
     ToolCallRecord,
     UnknownsOutput,
 )
@@ -87,6 +89,40 @@ def _coerce_tool_log(
             )
         )
     return records or None
+
+
+def _map_insights_to_synthesis(
+    insights: InsightSynthesisOutput,
+) -> tuple[SynthesisOutput, list[ResearchQuestion]]:
+    """
+    Map InsightSynthesisOutput fields into SynthesisOutput for GroundedFindingsSchema.
+
+    Mapping:
+      - future_trial_hypothesis ← first key_finding or empty
+      - endpoint_improvement_recommendations ← recommended_next_analyses[].analysis
+      - recommended_sample_size ← empty (no direct source)
+      - variables_to_control ← empty (no direct source)
+      - research_questions ← required_metadata_or_questions mapped to ResearchQuestion
+    """
+    source_finding = insights.key_findings[0] if insights.key_findings else "synthesis"
+
+    # Map required_metadata_or_questions to ResearchQuestion objects
+    research_qs = [
+        ResearchQuestion(question=q, source_finding=source_finding)
+        for q in insights.required_metadata_or_questions
+    ]
+
+    synthesis = SynthesisOutput(
+        future_trial_hypothesis=insights.key_findings[0] if insights.key_findings else "",
+        endpoint_improvement_recommendations=[
+            ra.analysis for ra in insights.recommended_next_analyses
+        ],
+        recommended_sample_size="",  # No direct mapping from InsightSynthesisOutput
+        variables_to_control=[],     # No direct mapping from InsightSynthesisOutput
+        research_questions=research_qs,
+    )
+
+    return synthesis, research_qs
 
 
 def _compact_tool_log_for_persistence(
@@ -1053,6 +1089,7 @@ def run_agentic_insights(
                 excluded_columns=excluded_cols_list,
                 high_missingness_columns=high_miss_cols_list,
                 listwise_deletion_columns=listwise_cols_list,
+                # synthesis and research_questions populated after potential re-run below
             )
             _emit("stage_complete", "literature_validation", f"Literature: {len(grounded_list)} findings grounded")
 
@@ -1081,6 +1118,11 @@ def run_agentic_insights(
                 synthesis_quality = score_synthesis_quality(best_insights, study_context, provider)
                 synthesis_quality.rerun_triggered = True
             _emit("stage_complete", "synthesis_scoring", f"Synthesis quality: {synthesis_quality.score:.2f}")
+
+            # ── Map InsightSynthesisOutput to SynthesisOutput for frontend ────────
+            synthesis_output, research_qs = _map_insights_to_synthesis(best_insights)
+            grounded_findings.synthesis = synthesis_output
+            grounded_findings.research_questions = research_qs
         except Exception as exc:
             console.print(f"  [yellow]⚠ New pipeline steps skipped: {exc}[/yellow]")
 
