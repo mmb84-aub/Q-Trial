@@ -18,7 +18,10 @@ from typing import Any, Callable
 
 from rich.prompt import Confirm, Prompt
 
-from qtrial_backend.agentic.reasoning import run_reasoning_engine
+from qtrial_backend.agentic.reasoning import (
+    _extract_inline_citations,
+    run_reasoning_engine,
+)
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
     FinalReportSchema,
@@ -112,6 +115,140 @@ def _compact_tool_log_for_persistence(
             entry["error"] = rec.error
         out.append(entry)
     return out
+
+
+def _coerce_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_columns_from_tool_record(
+    record: ToolCallRecord,
+    available_columns: set[str],
+) -> list[str]:
+    candidates: list[str] = []
+
+    args = record.args if isinstance(record.args, dict) else {}
+    result = record.result if isinstance(record.result, dict) else {}
+
+    scalar_keys = (
+        "column",
+        "numeric_column",
+        "group_column",
+        "time_column",
+        "event_column",
+    )
+    list_keys = ("columns", "group_columns", "target_columns")
+
+    for source in (args, result):
+        for key in scalar_keys:
+            value = source.get(key)
+            if isinstance(value, str) and value in available_columns:
+                candidates.append(value)
+        for key in list_keys:
+            value = source.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and item in available_columns:
+                        candidates.append(item)
+
+    return list(dict.fromkeys(candidates))
+
+
+def _sample_size_warning_for_tool_record(record: ToolCallRecord) -> str | None:
+    result = record.result if isinstance(record.result, dict) else {}
+    tool_name = record.tool_name
+
+    if tool_name in {"hypothesis_test", "effect_size"}:
+        # Both tools explicitly require at least 2 observations per group.
+        # Source:
+        # - tools/stats/hypothesis_test.py: "Need at least 2 per group."
+        # - tools/stats/effect_size.py: "Need at least 2 per group."
+        group_a = result.get("group_a") if isinstance(result.get("group_a"), dict) else {}
+        group_b = result.get("group_b") if isinstance(result.get("group_b"), dict) else {}
+        n_a = _coerce_int(group_a.get("n"))
+        n_b = _coerce_int(group_b.get("n"))
+        if n_a is not None and n_b is not None and min(n_a, n_b) < 2:
+            return "Sample size may be insufficient for this test."
+
+    if tool_name == "pairwise_group_test":
+        # Pairwise Mann-Whitney subtests are skipped when either side has <2
+        # observations, so use that repo-defined minimum for pair-level warnings.
+        # Source: tools/stats/pairwise_test.py -> "skipped": "too few observations"
+        pairwise_results = result.get("pairwise_results")
+        if isinstance(pairwise_results, list):
+            for entry in pairwise_results:
+                if not isinstance(entry, dict):
+                    continue
+                n_a = _coerce_int(entry.get("n_a"))
+                n_b = _coerce_int(entry.get("n_b"))
+                if n_a is not None and n_b is not None and min(n_a, n_b) < 2:
+                    return "Sample size may be insufficient for this test."
+
+    return None
+
+
+def _annotate_confidence_warnings(
+    grounded_findings: GroundedFindingsSchema | None,
+    evidence: dict[str, Any],
+    tool_log: list[ToolCallRecord] | None,
+) -> GroundedFindingsSchema | None:
+    if grounded_findings is None or not grounded_findings.findings or not tool_log:
+        return grounded_findings
+
+    missingness_pct = (
+        evidence.get("missingness_pct")
+        if isinstance(evidence.get("missingness_pct"), dict)
+        else {}
+    )
+    available_columns = set(missingness_pct.keys())
+    tool_log_by_alias = {
+        rec.citation_alias: rec for rec in tool_log if rec.citation_alias
+    }
+
+    updated_findings = []
+    for finding in grounded_findings.findings:
+        warnings: list[str] = []
+        aliases = [
+            cite for cite in _extract_inline_citations(finding.finding_text)
+            if cite.startswith("tool_log[")
+        ]
+
+        for alias in aliases:
+            record = tool_log_by_alias.get(alias)
+            if record is None:
+                continue
+
+            columns = _extract_columns_from_tool_record(record, available_columns)
+            if any(
+                isinstance(missingness_pct.get(column), (int, float))
+                and float(missingness_pct[column]) > 30.0
+                for column in columns
+            ):
+                warnings.append(
+                    "Based on a column with high missingness — interpret with caution."
+                )
+
+            sample_warning = _sample_size_warning_for_tool_record(record)
+            if sample_warning:
+                warnings.append(sample_warning)
+
+        deduped_warnings = list(dict.fromkeys(warnings))
+        if deduped_warnings:
+            warning_value: str | list[str]
+            if len(deduped_warnings) == 1:
+                warning_value = deduped_warnings[0]
+            else:
+                warning_value = deduped_warnings
+            updated_findings.append(
+                finding.model_copy(update={"confidence_warning": warning_value})
+            )
+        else:
+            updated_findings.append(finding)
+
+    return grounded_findings.model_copy(update={"findings": updated_findings})
 
 
 # ── Metadata helpers ──────────────────────────────────────────────────────────
@@ -914,6 +1051,12 @@ def run_agentic_insights(
 
     # ── Reproducibility log ───────────────────────────────────────────────────
     repro_log = _repro.finalise(synthesis_quality_score=synthesis_quality)
+
+    grounded_findings = _annotate_confidence_warnings(
+        grounded_findings=grounded_findings,
+        evidence=evidence,
+        tool_log=typed_tool_log,
+    )
 
     report = FinalReportSchema(
         provider=provider,
