@@ -581,7 +581,7 @@ def _extract_claims_from_insights(
     unresolved_high_impact: list[str],
 ) -> list[ClaimDraft]:
     """
-    Build ``ClaimDraft`` objects from InsightSynthesisOutput dicts.
+    Build ``ClaimDraft`` objects from SynthesisInsights dicts.
 
     Sources (in order):
       1. ``key_findings`` — each string becomes a claim.
@@ -845,7 +845,7 @@ def run_reasoning_engine(
     Returns
     -------
     ReasoningState
-        Fully populated state ready for ``FinalReportSchema.reasoning_state``.
+        Fully populated state ready for ``AnalysisReport.reasoning_state``.
     """
 
     # ── 0. Initialization ────────────────────────────────────────────────

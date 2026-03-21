@@ -7,10 +7,10 @@ import pandas as pd
 from rich.console import Console
 
 from qtrial_backend.agentic.agents import (
-    run_data_quality_agent,
-    run_clinical_semantics_agent,
-    run_unknowns_agent,
-    run_insight_synthesis_agent,
+    assess_data_quality,
+    interpret_column_semantics,
+    surface_unknowns,
+    synthesise_insights,
 )
 from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.planner import call_planner
@@ -24,10 +24,10 @@ from qtrial_backend.agentic.reasoning import (
 )
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
-    FinalReportSchema,
-    GroundedFindingsSchema,
+    AnalysisReport,
+    GroundedFindings,
     GuardrailReport,
-    InsightSynthesisOutput,
+    SynthesisInsights,
     LiteratureRAGReport,
     MetadataInput,
     ToolCallRecord,
@@ -43,7 +43,7 @@ from qtrial_backend.tools.literature.rag import (
     run_literature_rag,
 )
 from qtrial_backend.agentic.cst_translator import translate_findings_to_cst
-from qtrial_backend.agentic.literature_validator import LiteratureValidatorPipeline
+from qtrial_backend.agentic.literature_validator import LiteratureGrounder
 from qtrial_backend.agentic.synthesis_scorer import (
     score_synthesis_quality,
     SYNTHESIS_QUALITY_THRESHOLD,
@@ -191,10 +191,10 @@ def _sample_size_warning_for_tool_record(record: ToolCallRecord) -> str | None:
 
 
 def _annotate_confidence_warnings(
-    grounded_findings: GroundedFindingsSchema | None,
+    grounded_findings: GroundedFindings | None,
     evidence: dict[str, Any],
     tool_log: list[ToolCallRecord] | None,
-) -> GroundedFindingsSchema | None:
+) -> GroundedFindings | None:
     if grounded_findings is None or not grounded_findings.findings or not tool_log:
         return grounded_findings
 
@@ -355,7 +355,7 @@ def _interactive_qa_loop(
     *,
     initial_unknowns: UnknownsOutput,
     initial_metadata: MetadataInput | None,
-    initial_insights: InsightSynthesisOutput,
+    initial_insights: SynthesisInsights,
     initial_judge: Any,  # JudgeOutput | None
     preview: dict,
     evidence: dict,
@@ -368,7 +368,7 @@ def _interactive_qa_loop(
     typed_tool_log: list[ToolCallRecord] | None,
     agent_runs: list[AgentRunRecord],
     max_iterations: int = 5,
-) -> tuple[MetadataInput | None, InsightSynthesisOutput, Any, UnknownsOutput]:
+) -> tuple[MetadataInput | None, SynthesisInsights, Any, UnknownsOutput]:
     """
     Interactive closed-loop: present unresolved high-impact unknowns to the
     user one-by-one, collect answers, merge them into MetadataInput, re-run
@@ -444,7 +444,7 @@ def _interactive_qa_loop(
                 f"  [yellow]▸ Re-running ClinicalSemanticsAgent "
                 f"({loop_label})…[/yellow]"
             )
-            cs_refreshed = run_clinical_semantics_agent(
+            cs_refreshed = interpret_column_semantics(
                 preview, enriched, cs_step, provider,
                 prior_analysis_report=analysis_report,
                 tool_log=typed_tool_log,
@@ -470,7 +470,7 @@ def _interactive_qa_loop(
         console.print(
             f"  [yellow]▸ Re-running UnknownsAgent ({loop_label})…[/yellow]"
         )
-        ua_refreshed = run_unknowns_agent(
+        ua_refreshed = surface_unknowns(
             preview, enriched,
             collected.get("DataQualityAgent"),
             collected.get("ClinicalSemanticsAgent"),
@@ -497,7 +497,7 @@ def _interactive_qa_loop(
         console.print(
             f"  [yellow]▸ Re-running InsightSynthesisAgent ({loop_label})…[/yellow]"
         )
-        insights_refreshed = run_insight_synthesis_agent(
+        insights_refreshed = synthesise_insights(
             preview, enriched,
             collected.get("DataQualityAgent"),
             collected.get("ClinicalSemanticsAgent"),
@@ -573,7 +573,7 @@ def _interactive_qa_loop(
     return current_metadata, current_insights, current_judge, current_unknowns
 
 
-def run_agentic_insights(
+def run_pipeline(
     df: pd.DataFrame,
     provider: ProviderName,
     max_rows: int = 25,
@@ -589,7 +589,7 @@ def run_agentic_insights(
     study_context: str = "",
     # ── new: data dictionary (column name → description) ─────────────────────
     column_dict: dict[str, str] | None = None,
-) -> FinalReportSchema:
+) -> AnalysisReport:
     """
     Run the full agentic reasoning pipeline.
 
@@ -719,14 +719,14 @@ def run_agentic_insights(
         )
 
         if agent == "DataQualityAgent":
-            output_obj = run_data_quality_agent(
+            output_obj = assess_data_quality(
                 preview, evidence, step, provider,
                 prior_analysis_report=analysis_report,
                 tool_log=typed_tool_log,
             )
 
         elif agent == "ClinicalSemanticsAgent":
-            output_obj = run_clinical_semantics_agent(
+            output_obj = interpret_column_semantics(
                 preview, evidence, step, provider,
                 prior_analysis_report=analysis_report,
                 tool_log=typed_tool_log,
@@ -735,7 +735,7 @@ def run_agentic_insights(
         elif agent == "UnknownsAgent":
             dq_out = collected.get("DataQualityAgent")
             cs_out = collected.get("ClinicalSemanticsAgent")
-            output_obj = run_unknowns_agent(
+            output_obj = surface_unknowns(
                 preview, evidence, dq_out, cs_out, step, provider,
                 prior_analysis_report=analysis_report,
                 tool_log=typed_tool_log,
@@ -746,7 +746,7 @@ def run_agentic_insights(
             dq_out = collected.get("DataQualityAgent")
             cs_out = collected.get("ClinicalSemanticsAgent")
             ua_out = collected.get("UnknownsAgent")
-            output_obj = run_insight_synthesis_agent(
+            output_obj = synthesise_insights(
                 preview, evidence, dq_out, cs_out, provider,
                 citations=citations,
                 unknowns_output=ua_out,
@@ -795,7 +795,7 @@ def run_agentic_insights(
             "Synthesis certainty is reduced for unresolved items.[/dim]\n"
         )
 
-    final_insights = InsightSynthesisOutput.model_validate(
+    final_insights = SynthesisInsights.model_validate(
         collected["InsightSynthesisAgent"]
     )
 
@@ -836,7 +836,7 @@ def run_agentic_insights(
                 "  [yellow]▸ Re-running ClinicalSemanticsAgent "
                 "(semantics updated)…[/yellow]"
             )
-            cs_refreshed = run_clinical_semantics_agent(
+            cs_refreshed = interpret_column_semantics(
                 preview, enriched, cs_step, provider,
                 prior_analysis_report=analysis_report,
                 tool_log=typed_tool_log,
@@ -855,7 +855,7 @@ def run_agentic_insights(
 
     # ── Step viii: interactive closed-loop Q&A ────────────────────────────
     loop_metadata: MetadataInput | None = metadata
-    loop_insights: InsightSynthesisOutput | None = None
+    loop_insights: SynthesisInsights | None = None
     loop_judge: Any = None
     loop_unknowns: UnknownsOutput | None = None
 
@@ -968,7 +968,7 @@ def run_agentic_insights(
         "  [yellow]\u25b8 Running InsightSynthesisAgent "
         "(full context: analysis + literature)\u2026[/yellow]"
     )
-    insights_final = run_insight_synthesis_agent(
+    insights_final = synthesise_insights(
         preview,
         evidence,
         collected.get("DataQualityAgent"),
@@ -996,7 +996,7 @@ def run_agentic_insights(
     final_metadata = loop_metadata if interactive else metadata
 
     # ── NEW: CST translation → literature validation → synthesis scoring ──────
-    grounded_findings: GroundedFindingsSchema | None = None
+    grounded_findings: GroundedFindings | None = None
     synthesis_quality: Any = None
 
     if study_context:
@@ -1015,10 +1015,10 @@ def run_agentic_insights(
                 "[bold cyan]► Literature Validation:[/bold cyan] "
                 "Cross-referencing medical literature…"
             )
-            lit_pipeline = LiteratureValidatorPipeline(provider=provider)
+            lit_pipeline = LiteratureGrounder(provider=provider)
             grounded_list = lit_pipeline.validate(csts)
             _repro.add_literature_queries(lit_pipeline.query_records)
-            grounded_findings = GroundedFindingsSchema(findings=grounded_list)
+            grounded_findings = GroundedFindings(findings=grounded_list)
             _emit("stage_complete", "literature_validation", f"Literature: {len(grounded_list)} findings grounded")
 
             console.print(
@@ -1031,7 +1031,7 @@ def run_agentic_insights(
                     f"  [yellow]⚠ Quality score {synthesis_quality.score:.2f} < "
                     f"threshold {SYNTHESIS_QUALITY_THRESHOLD:.2f} — re-running synthesis…[/yellow]"
                 )
-                best_insights = run_insight_synthesis_agent(
+                best_insights = synthesise_insights(
                     preview, evidence,
                     collected.get("DataQualityAgent"),
                     collected.get("ClinicalSemanticsAgent"),
@@ -1058,7 +1058,7 @@ def run_agentic_insights(
         tool_log=typed_tool_log,
     )
 
-    report = FinalReportSchema(
+    report = AnalysisReport(
         provider=provider,
         model=model_name,
         plan=plan,

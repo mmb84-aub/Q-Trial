@@ -17,13 +17,13 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from qtrial_backend.agentic.schemas import FinalReportSchema
+from qtrial_backend.agentic.schemas import AnalysisReport
 
 _REPORT_VERSION = "1.0.0"
 _REACT_REPORT_URL = "http://localhost:5173/report"
 
 
-def _build_cover_html(report: FinalReportSchema, dataset_hash: str) -> str:
+def _build_cover_html(report: AnalysisReport, dataset_hash: str) -> str:
     """Build a minimal HTML cover page with all required metadata."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     study_ctx = report.study_context or "Not provided"
@@ -59,7 +59,7 @@ def _build_cover_html(report: FinalReportSchema, dataset_hash: str) -> str:
 </html>"""
 
 
-def generate_pdf_report(report: FinalReportSchema, dataset_hash: str = "") -> bytes:
+def generate_pdf_report(report: AnalysisReport, dataset_hash: str = "") -> bytes:
     """
     Render the report as a PDF and return the raw bytes.
 

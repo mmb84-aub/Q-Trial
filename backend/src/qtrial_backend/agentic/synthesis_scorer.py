@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 
-from qtrial_backend.agentic.schemas import InsightSynthesisOutput, SynthesisQualityScore
+from qtrial_backend.agentic.schemas import SynthesisInsights, SynthesisQualityScore
 from qtrial_backend.core.router import get_client
 from qtrial_backend.core.types import LLMRequest, ProviderName
 
@@ -44,7 +44,7 @@ No markdown, no extra keys.
 
 
 def score_synthesis_quality(
-    output: InsightSynthesisOutput,
+    output: SynthesisInsights,
     study_context: str,
     provider: ProviderName = "gemini",
 ) -> SynthesisQualityScore:

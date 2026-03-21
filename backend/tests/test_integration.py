@@ -39,7 +39,7 @@ def test_integration_smoke_pipeline_produces_reproducibility_log(tmp_path: Path)
     """
     # Feature: clinical-data-analyst-agent, Property 13: Grounding status validity
     # Validates: Requirements 13.3, 13.4
-    from qtrial_backend.agentic.orchestrator import run_agentic_insights
+    from qtrial_backend.agentic.orchestrator import run_pipeline
 
     df = pd.read_csv(DATASET_PATH)
     study_context = (
@@ -47,7 +47,7 @@ def test_integration_smoke_pipeline_produces_reproducibility_log(tmp_path: Path)
         "Primary endpoint: time to death or liver transplant."
     )
 
-    report = run_agentic_insights(
+    report = run_pipeline(
         df=df,
         provider="gemini",
         max_rows=25,
@@ -88,20 +88,20 @@ def test_integration_reproducibility_query_strings_stable_across_runs(tmp_path: 
     """
     # Feature: clinical-data-analyst-agent, Property 14: Reproducibility
     # Validates: Requirements 13.3
-    from qtrial_backend.agentic.orchestrator import run_agentic_insights
+    from qtrial_backend.agentic.orchestrator import run_pipeline
 
     df = pd.read_csv(DATASET_PATH)
     study_context = "Reproducibility test run — PBC dataset."
 
     os.environ.setdefault("ANALYSIS_SEED", "42")
 
-    report_1 = run_agentic_insights(
+    report_1 = run_pipeline(
         df=df, provider="gemini", max_rows=10, max_iterations=3,
         run_judge=False, metadata=None, verbose=False,
         prior_analysis_report=None, tool_log=None, emit=None,
         study_context=study_context,
     )
-    report_2 = run_agentic_insights(
+    report_2 = run_pipeline(
         df=df, provider="gemini", max_rows=10, max_iterations=3,
         run_judge=False, metadata=None, verbose=False,
         prior_analysis_report=None, tool_log=None, emit=None,

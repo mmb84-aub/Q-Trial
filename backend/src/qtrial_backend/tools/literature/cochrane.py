@@ -3,7 +3,7 @@ Cochrane Library retriever.
 
 Queries the Cochrane CDSR (Cochrane Database of Systematic Reviews) REST API
 and returns results in the same dict shape as _parse_pubmed_xml output so the
-LiteratureValidatorPipeline can treat all sources uniformly.
+LiteratureGrounder can treat all sources uniformly.
 """
 from __future__ import annotations
 

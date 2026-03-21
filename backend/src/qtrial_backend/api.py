@@ -1,5 +1,5 @@
 """
-Q-Trial FastAPI server — exposes run_agentic_insights as an HTTP endpoint.
+Q-Trial FastAPI server — exposes run_pipeline as an HTTP endpoint.
 
 Run from backend/:
     poetry run uvicorn qtrial_backend.api:app --reload --port 8000
@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from rich.console import Console
 
-from qtrial_backend.agentic.orchestrator import run_agentic_insights
+from qtrial_backend.agentic.orchestrator import run_pipeline
 from qtrial_backend.agentic.schemas import MetadataInput
 from qtrial_backend.agent.runner import run_statistical_agent_loop
 from qtrial_backend.providers.gemini_client import set_thread_emit
@@ -93,7 +93,7 @@ async def run_analysis(
     """
     Upload a dataset and run the full agentic pipeline.
 
-    Returns the serialised FinalReportSchema as JSON.
+    Returns the serialised AnalysisReport as JSON.
     """
     # ── Read uploaded file ───────────────────────────────────────────────────
     content = await file.read()
@@ -141,7 +141,7 @@ async def run_analysis(
     # ── Run pipeline in thread pool (blocking → async) ───────────────────────
     try:
         report = await asyncio.to_thread(
-            run_agentic_insights,
+            run_pipeline,
             df,
             provider,
             max_rows,
@@ -183,7 +183,7 @@ async def run_analysis_stream(
     live per-stage progress.  Each event is a JSON object on a `data: ...\\n\\n` line:
 
       {"type": "stage_complete", "stage": "DataQualityAgent", "message": "..."}
-      {"type": "complete",       "data": {<FinalReportSchema>}}
+      {"type": "complete",       "data": {<AnalysisReport>}}
       {"type": "error",          "message": "..."}
     """
     content = await file.read()
@@ -267,7 +267,7 @@ async def run_analysis_stream(
             analysis_report = "\n\n---\n\n".join(parts) if parts else None
 
             # ── 4. Full agentic + reasoning pipeline ─────────────────────────
-            report = run_agentic_insights(
+            report = run_pipeline(
                 df, provider, max_rows, 30, run_judge, meta, False,
                 analysis_report, tool_log, emit,
                 study_context, column_dict,
@@ -364,15 +364,15 @@ async def detect_treatment(
 
 @app.post("/api/report/pdf")
 async def generate_pdf(
-    report_json: str = Form(..., description="Serialised FinalReportSchema JSON"),
+    report_json: str = Form(..., description="Serialised AnalysisReport JSON"),
     dataset_hash: str = Form("", description="SHA-256 hash of the input dataset"),
 ) -> Any:
-    """Generate a PDF report from the serialised FinalReportSchema."""
+    """Generate a PDF report from the serialised AnalysisReport."""
     try:
         from qtrial_backend.report.pdf_generator import generate_pdf_report
-        from qtrial_backend.agentic.schemas import FinalReportSchema as _FRS
+        from qtrial_backend.agentic.schemas import AnalysisReport as _AR
         import json as _json
-        report_obj = _FRS.model_validate(_json.loads(report_json))
+        report_obj = _AR.model_validate(_json.loads(report_json))
         pdf_bytes = await asyncio.to_thread(generate_pdf_report, report_obj, dataset_hash)
         from fastapi.responses import Response
         return Response(

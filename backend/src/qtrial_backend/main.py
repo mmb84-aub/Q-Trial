@@ -65,7 +65,7 @@ def insights(
 
     # ── AGENTIC MODE ──────────────────────────────────────────────────────────
     if mode == "agentic":
-        from qtrial_backend.agentic.orchestrator import run_agentic_insights
+        from qtrial_backend.agentic.orchestrator import run_pipeline
         from qtrial_backend.agentic.schemas import MetadataInput
 
         # Load and validate optional metadata file
@@ -120,7 +120,7 @@ def insights(
         parts = [p for p in [static_report, loop_report] if p]
         analysis_report = "\n\n---\n\n".join(parts) if parts else None
 
-        report = run_agentic_insights(
+        report = run_pipeline(
             df, provider,
             max_rows=max_rows, max_cols=max_cols,
             run_judge=judge,

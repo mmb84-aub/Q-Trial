@@ -9,7 +9,7 @@ const STAGE_INFO: Record<string, { label: string; detail: string }> = {
   ClinicalSemanticsAgent: { label: "Column interpretation",      detail: "Inferring what each column represents clinically." },
   UnknownsAgent:          { label: "Unknowns & assumptions",     detail: "Surfacing what the data can't tell us and what we're assuming." },
   InsightSynthesisAgent:  { label: "Synthesising insights",      detail: "Combining all findings into a coherent clinical narrative." },
-  CSTTranslation:         { label: "Clinical search terms",      detail: "Translating statistical findings into literature search queries." },
+  cst_translation:        { label: "Clinical search terms",      detail: "Translating statistical findings into literature search queries." },
   LiteratureValidation:   { label: "Literature validation",      detail: "Checking findings against PubMed, Cochrane, and ClinicalTrials.gov." },
   SynthesisScoring:       { label: "Quality check",              detail: "Self-scoring the synthesis — re-running if it falls below threshold." },
   ReproducibilityLog:     { label: "Reproducibility log",        detail: "Recording every LLM call and query so the run can be audited." },

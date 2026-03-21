@@ -3,8 +3,8 @@ from qtrial_backend.agentic.schemas import (
     DataQualityOutput,
     ClinicalSemanticsOutput,
     UnknownsOutput,
-    InsightSynthesisOutput,
-    FinalReportSchema,
+    SynthesisInsights,
+    AnalysisReport,
     FailedClaim,
     RubricScores,
     JudgeOutput,
@@ -30,7 +30,7 @@ from qtrial_backend.agentic.schemas import (
     HypothesisGenerationOutput,
 )
 from qtrial_backend.agentic.judge import run_judge_agent
-from qtrial_backend.agentic.orchestrator import run_agentic_insights
+from qtrial_backend.agentic.orchestrator import run_pipeline
 from qtrial_backend.agentic.reasoning import (
     build_valid_citation_keys,
     validate_claim_citations,
@@ -55,8 +55,8 @@ __all__ = [
     "DataQualityOutput",
     "ClinicalSemanticsOutput",
     "UnknownsOutput",
-    "InsightSynthesisOutput",
-    "FinalReportSchema",
+    "SynthesisInsights",
+    "AnalysisReport",
     "FailedClaim",
     "RubricScores",
     "JudgeOutput",
@@ -98,5 +98,5 @@ __all__ = [
     "integrate_dynamic_hypotheses",
     # pipeline runners
     "run_judge_agent",
-    "run_agentic_insights",
+    "run_pipeline",
 ]
