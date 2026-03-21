@@ -10,6 +10,11 @@ interface Props {
 
 export function FindingCard({ finding, index }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const confidenceWarnings = Array.isArray(finding.confidence_warning)
+    ? finding.confidence_warning
+    : finding.confidence_warning
+      ? [finding.confidence_warning]
+      : [];
 
   return (
     <article
@@ -24,12 +29,32 @@ export function FindingCard({ finding, index }: Props) {
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
         <GroundingBadge finding={finding} />
-        <h4
-          id={`finding-${index}-title`}
-          style={{ margin: 0, flex: 1, fontSize: "0.95rem", lineHeight: 1.5, color: "#111827" }}
-        >
-          {finding.finding_text}
-        </h4>
+        <div style={{ flex: 1 }}>
+          <h4
+            id={`finding-${index}-title`}
+            style={{ margin: 0, fontSize: "0.95rem", lineHeight: 1.5, color: "#111827" }}
+          >
+            {finding.finding_text}
+          </h4>
+          {confidenceWarnings.length > 0 && (
+            <div
+              role="note"
+              aria-label="Confidence warning"
+              style={{
+                marginTop: "0.5rem",
+                background: "#fff7ed",
+                border: "1px solid #fdba74",
+                borderRadius: 6,
+                padding: "0.5rem 0.75rem",
+                fontSize: "0.82rem",
+                color: "#9a3412",
+              }}
+            >
+              <strong>Confidence warning:</strong>{" "}
+              {confidenceWarnings.join(" ")}
+            </div>
+          )}
+        </div>
         <button
           aria-expanded={expanded}
           aria-controls={`finding-${index}-details`}

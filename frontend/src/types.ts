@@ -30,6 +30,7 @@ export interface GroundedFinding {
   literature_skip_note: string | null;
   test_selection_rationale: string | null;
   missingness_disclosure: string | null;
+  confidence_warning: string | string[] | null;
 }
 
 export interface ResearchQuestion {
