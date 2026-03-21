@@ -1,0 +1,227 @@
+{
+  "run_id": "bedrock_1774129685",
+  "timestamp": "2026-03-21T21:48:40.584022+00:00",
+  "study_context": "pbc data to see for any new findings",
+  "seed": 42,
+  "llm_calls": [],
+  "literature_queries": [
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis survival prognosis outcomes",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis ascites survival prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cholangitis data quality duplicate detection",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis survival prognosis outcomes",
+      "results_count": 5,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cholangitis data quality duplicate detection",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis prognostic factors distribution non-normal",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis mortality survival outcomes prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis mortality survival outcomes liver disease",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis mortality survival outcomes prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis survival outcomes prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis long-term follow-up outcomes prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis baseline assessment missing data ascites hepatomegaly",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis survival outcomes prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis baseline assessment missing data ascites hepatomegaly",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis ascites survival prognosis",
+      "results_count": 5,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "Cox proportional hazards regression primary biliary cirrhosis survival prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis mortality survival outcomes liver disease",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis long-term follow-up outcomes prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis prognostic factors distribution non-normal",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "Cox proportional hazards regression primary biliary cirrhosis survival prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    }
+  ],
+  "clinical_search_terms": [
+    {
+      "source_finding": "- Exact duplicate rows: **0** (0.00%)",
+      "term": "primary biliary cholangitis data quality duplicate detection",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "Survival Analysis (time=`time`, event=`ascites`)",
+      "term": "primary biliary cirrhosis ascites survival prognosis",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "**Overall median survival:** inf",
+      "term": "primary biliary cirrhosis survival prognosis outcomes",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "Log-rank test p-value: **0.4529** (not significant at α=0.05)",
+      "term": "primary biliary cirrhosis survival outcomes prognosis",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "**Normality Test Results**: All prognostic factors are **non-normally distributed** (all p < 0.001).",
+      "term": "primary biliary cirrhosis prognostic factors distribution non-normal",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "However, this does not invalidate Cox proportional hazards regression, which does not assume normality of predictors.",
+      "term": "Cox proportional hazards regression primary biliary cirrhosis survival prognosis",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "**Follow-up Period**: Median 1,730 days (~4.7 years), range 41–4,795 days",
+      "term": "primary biliary cirrhosis long-term follow-up outcomes prognosis",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "**Primary Endpoint**: Death (status=2) or alive/censored (status=0)",
+      "term": "primary biliary cirrhosis mortality survival outcomes liver disease",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "- Event Rate: 46.2% (144 deaths / 312 complete cases)",
+      "term": "primary biliary cirrhosis mortality survival outcomes prognosis",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "- **Structural**: 106 rows (25.4%) missing trt, ascites, hepato, spiders, alk.phos, ast, copper — indicates incomplete baseline assessment in a subset",
+      "term": "primary biliary cirrhosis baseline assessment missing data ascites hepatomegaly",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    }
+  ],
+  "tool_call_log": [],
+  "synthesis_quality_score": {
+    "score": 0.92,
+    "rationale": "Completeness: All five required fields are present and substantively filled (future_trial_hypothesis is specific, endpoint_improvement_recommendations are actionable, recommended_sample_size includes rationale, variables_to_control list six categories with reasons, research_questions number four with source findings). Clinical relevance: Recommendations directly address PBC pathophysiology (bilirubin, copper, portal hypertension signs) and trial design gaps (missing data, lack of stratification, treatment effect masking). Plain language: Narrative summary avoids raw p-values and statistical notation, explaining findings in clinical terms (e.g., 'bilirubin is the single strongest predictor' rather than 'ρ=0.53'); however, the synthesis body contains p-values and correlation coefficients. Evidence grounding: Each research question and recommendation is linked to specific observed correlations or missing data patterns (e.g., copper ρ=0.45 with status, 25% missingness in treatment), not generic advice.",
+    "rerun_triggered": false
+  }
+}

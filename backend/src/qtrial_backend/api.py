@@ -316,18 +316,31 @@ async def run_analysis_stream(
     async def event_generator():
         t = threading.Thread(target=_run_pipeline, daemon=True)
         t.start()
+        # Poll the queue in short intervals so we can emit SSE keepalive
+        # comments while the pipeline is running. This prevents proxies and
+        # browsers from closing the connection during long-running stages.
+        # Hard timeout: 30 minutes (1800s) — enough for 25 agent iterations
+        # + parallel literature validation + synthesis.
+        _KEEPALIVE_INTERVAL = 25.0   # seconds between keepalive pings
+        _HARD_TIMEOUT = 1800.0       # 30 minutes total
+        elapsed = 0.0
         while True:
             try:
-                event = await asyncio.wait_for(aq.get(), timeout=420.0)
+                event = await asyncio.wait_for(aq.get(), timeout=_KEEPALIVE_INTERVAL)
             except asyncio.TimeoutError:
-                yield (
-                    f"data: {_safe_json({'type': 'error', 'message': 'Pipeline timed out'})}\n\n"
-                )
-                break
+                elapsed += _KEEPALIVE_INTERVAL
+                if elapsed >= _HARD_TIMEOUT:
+                    yield (
+                        f"data: {_safe_json({'type': 'error', 'message': 'Pipeline timed out after 30 minutes'})}\n\n"
+                    )
+                    break
+                # SSE comment — keeps the connection alive, ignored by the parser
+                yield ": keepalive\n\n"
+                continue
+            elapsed = 0.0  # reset on any real event
             try:
                 serialized = _safe_json(event)
             except Exception as ser_exc:
-                # Last-resort: emit a sanitized error rather than crashing the stream
                 serialized = _safe_json({"type": "error", "message": f"Serialization error: {ser_exc}"})
             yield f"data: {serialized}\n\n"
             if event.get("type") in ("complete", "error"):
