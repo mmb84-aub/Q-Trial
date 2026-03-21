@@ -28,6 +28,7 @@ from qtrial_backend.providers.openrouter_client import set_thread_model as set_o
 from qtrial_backend.providers.bedrock_client import set_thread_model as set_bedrock_model
 from qtrial_backend.report.static import build_static_report
 from qtrial_backend.dataset.treatment_detector import detect_treatment_columns
+from qtrial_backend.dataset.load import classify_missingness
 from qtrial_backend.report.adl import build_adl
 
 console = Console()
@@ -120,6 +121,15 @@ async def run_analysis(
     # ── Run static statistical report first (deterministic, no LLM) ─────────
     dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
     column_dict = _load_column_dict(dataset_name)
+
+    # ── Enforce missingness thresholds: exclude columns with >50% missing ────
+    missingness_disclosures = classify_missingness(df)
+    excluded_cols = [
+        col for col, d in missingness_disclosures.items() if d.action == "excluded"
+    ]
+    if excluded_cols:
+        df = df.drop(columns=excluded_cols)
+
     try:
         static_report = await asyncio.to_thread(build_static_report, df, dataset_name)
     except Exception:
@@ -154,6 +164,7 @@ async def run_analysis(
             None,
             study_context,
             column_dict,
+            missingness_disclosures,
         )
     except Exception as exc:
         raise HTTPException(
@@ -221,6 +232,14 @@ async def run_analysis_stream(
     if column_dict is None:
         column_dict = _load_column_dict(dataset_name)
 
+    # ── Enforce missingness thresholds: exclude columns with >50% missing ────
+    missingness_disclosures = classify_missingness(df)
+    excluded_cols = [
+        col for col, d in missingness_disclosures.items() if d.action == "excluded"
+    ]
+    if excluded_cols:
+        df = df.drop(columns=excluded_cols)
+
     def emit(event: dict) -> None:
         loop.call_soon_threadsafe(aq.put_nowait, event)
 
@@ -270,7 +289,7 @@ async def run_analysis_stream(
             report = run_agentic_insights(
                 df, provider, max_rows, 30, run_judge, meta, False,
                 analysis_report, tool_log, emit,
-                study_context, column_dict,
+                study_context, column_dict, missingness_disclosures,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

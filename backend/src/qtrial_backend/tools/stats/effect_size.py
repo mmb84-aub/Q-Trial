@@ -78,8 +78,14 @@ def effect_size(params: EffectSizeParams, ctx: AgentContext) -> dict:
 
     mask_a = df[params.group_column].astype(str) == str(params.group_a)
     mask_b = df[params.group_column].astype(str) == str(params.group_b)
-    a = df.loc[mask_a, params.numeric_column].dropna().to_numpy(dtype=float)
-    b = df.loc[mask_b, params.numeric_column].dropna().to_numpy(dtype=float)
+
+    # Track rows before and after listwise deletion
+    a_raw = df.loc[mask_a, params.numeric_column]
+    b_raw = df.loc[mask_b, params.numeric_column]
+    a = a_raw.dropna().to_numpy(dtype=float)
+    b = b_raw.dropna().to_numpy(dtype=float)
+    rows_dropped_a = int(a_raw.isna().sum())
+    rows_dropped_b = int(b_raw.isna().sum())
 
     if len(a) < 2 or len(b) < 2:
         raise ValueError(
@@ -90,8 +96,26 @@ def effect_size(params: EffectSizeParams, ctx: AgentContext) -> dict:
     result: dict = {
         "numeric_column": params.numeric_column,
         "group_column": params.group_column,
-        "group_a": {"label": str(params.group_a), "n": int(len(a)), "mean": round(float(a.mean()), 4), "std": round(float(a.std(ddof=1)), 4)},
-        "group_b": {"label": str(params.group_b), "n": int(len(b)), "mean": round(float(b.mean()), 4), "std": round(float(b.std(ddof=1)), 4)},
+        "group_a": {
+            "label": str(params.group_a),
+            "n": int(len(a)),
+            "n_before_dropna": int(len(a_raw)),
+            "rows_dropped": rows_dropped_a,
+            "mean": round(float(a.mean()), 4),
+            "std": round(float(a.std(ddof=1)), 4),
+        },
+        "group_b": {
+            "label": str(params.group_b),
+            "n": int(len(b)),
+            "n_before_dropna": int(len(b_raw)),
+            "rows_dropped": rows_dropped_b,
+            "mean": round(float(b.mean()), 4),
+            "std": round(float(b.std(ddof=1)), 4),
+        },
+        "listwise_deletion": {
+            "total_rows_dropped": rows_dropped_a + rows_dropped_b,
+            "note": "Rows with missing values in numeric_column were excluded per group.",
+        },
     }
 
     method = params.method.lower()

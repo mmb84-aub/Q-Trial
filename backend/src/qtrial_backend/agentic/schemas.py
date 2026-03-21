@@ -798,6 +798,19 @@ class ExcludedColumn(BaseModel):
 class HighMissingnessColumn(BaseModel):
     column: str
     missingness_rate: float  # 0.20–0.50
+    excluded_from_primary_analysis: bool = True
+
+
+class ListwiseDeletionColumn(BaseModel):
+    """Column with <20% missingness; uses listwise deletion per test.
+
+    Note: rows_dropped here is the per-column missing count (maximum that could
+    be dropped for this column alone). Actual per-test rows dropped are recorded
+    in each statistical tool's output under 'listwise_deletion.rows_dropped'.
+    """
+    column: str
+    missingness_rate: float  # <0.20
+    rows_dropped: int  # per-column missing count (max rows that could be dropped)
 
 
 class MissingnessDisclosure(BaseModel):
@@ -805,6 +818,7 @@ class MissingnessDisclosure(BaseModel):
     missingness_rate: float
     rows_dropped: int
     action: Literal["excluded", "high_missingness_section", "listwise_deletion"]
+    excluded_from_primary_analysis: bool = False
 
 
 class GroundedFindingsSchema(BaseModel):
@@ -813,6 +827,7 @@ class GroundedFindingsSchema(BaseModel):
     synthesis: SynthesisOutput | None = None
     excluded_columns: list[ExcludedColumn] = Field(default_factory=list)
     high_missingness_columns: list[HighMissingnessColumn] = Field(default_factory=list)
+    listwise_deletion_columns: list[ListwiseDeletionColumn] = Field(default_factory=list)
 
 
 # ── New schemas: Synthesis Quality, Reproducibility Log ──────────────────────

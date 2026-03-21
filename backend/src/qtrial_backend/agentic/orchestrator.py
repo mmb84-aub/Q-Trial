@@ -24,12 +24,16 @@ from qtrial_backend.agentic.reasoning import (
 )
 from qtrial_backend.agentic.schemas import (
     AgentRunRecord,
+    ExcludedColumn,
     FinalReportSchema,
     GroundedFindingsSchema,
     GuardrailReport,
+    HighMissingnessColumn,
     InsightSynthesisOutput,
+    ListwiseDeletionColumn,
     LiteratureRAGReport,
     MetadataInput,
+    MissingnessDisclosure,
     ToolCallRecord,
     UnknownsOutput,
 )
@@ -589,6 +593,8 @@ def run_agentic_insights(
     study_context: str = "",
     # ── new: data dictionary (column name → description) ─────────────────────
     column_dict: dict[str, str] | None = None,
+    # ── new: missingness disclosures from upstream classify_missingness ───────
+    missingness_disclosures: dict[str, MissingnessDisclosure] | None = None,
 ) -> FinalReportSchema:
     """
     Run the full agentic reasoning pipeline.
@@ -1018,7 +1024,36 @@ def run_agentic_insights(
             lit_pipeline = LiteratureValidatorPipeline(provider=provider)
             grounded_list = lit_pipeline.validate(csts)
             _repro.add_literature_queries(lit_pipeline.query_records)
-            grounded_findings = GroundedFindingsSchema(findings=grounded_list)
+
+            # ── Build excluded/high-missingness column lists from disclosures ────
+            excluded_cols_list: list[ExcludedColumn] = []
+            high_miss_cols_list: list[HighMissingnessColumn] = []
+            listwise_cols_list: list[ListwiseDeletionColumn] = []
+            if missingness_disclosures:
+                for col, disc in missingness_disclosures.items():
+                    if disc.action == "excluded":
+                        excluded_cols_list.append(
+                            ExcludedColumn(column=col, missingness_rate=disc.missingness_rate)
+                        )
+                    elif disc.action == "high_missingness_section":
+                        high_miss_cols_list.append(
+                            HighMissingnessColumn(column=col, missingness_rate=disc.missingness_rate)
+                        )
+                    elif disc.action == "listwise_deletion":
+                        listwise_cols_list.append(
+                            ListwiseDeletionColumn(
+                                column=col,
+                                missingness_rate=disc.missingness_rate,
+                                rows_dropped=disc.rows_dropped,
+                            )
+                        )
+
+            grounded_findings = GroundedFindingsSchema(
+                findings=grounded_list,
+                excluded_columns=excluded_cols_list,
+                high_missingness_columns=high_miss_cols_list,
+                listwise_deletion_columns=listwise_cols_list,
+            )
             _emit("stage_complete", "literature_validation", f"Literature: {len(grounded_list)} findings grounded")
 
             console.print(

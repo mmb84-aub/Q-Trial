@@ -49,7 +49,11 @@ def _fit_linear(outcome: str, predictors: list[str], df: pd.DataFrame, ctx: Agen
             "statsmodels is required for linear regression. Run: poetry add statsmodels"
         )
 
+    # Track rows before and after listwise deletion
+    n_before = len(df)
     sub = df[[outcome] + predictors].dropna()
+    rows_dropped = n_before - len(sub)
+
     if len(sub) < max(len(predictors) + 2, 10):
         raise ValueError(f"Too few complete observations: {len(sub)}")
 
@@ -78,12 +82,18 @@ def _fit_linear(outcome: str, predictors: list[str], df: pd.DataFrame, ctx: Agen
         "outcome": outcome,
         "predictors": list(X.columns.tolist()),
         "n_observations": int(len(sub)),
+        "n_before_dropna": n_before,
+        "rows_dropped": rows_dropped,
         "r_squared": round(float(model.rsquared), 4),
         "adj_r_squared": round(float(model.rsquared_adj), 4),
         "aic": round(float(model.aic), 4),
         "bic": round(float(model.bic), 4),
         "f_statistic_p": round(float(model.f_pvalue), 6),
         "coefficients": coefs,
+        "listwise_deletion": {
+            "rows_dropped": rows_dropped,
+            "note": "Rows with missing values in outcome or predictors were excluded.",
+        },
     }
 
 
@@ -95,7 +105,11 @@ def _fit_logistic(outcome: str, predictors: list[str], df: pd.DataFrame, ctx: Ag
             "statsmodels is required for logistic regression. Run: poetry add statsmodels"
         )
 
+    # Track rows before and after listwise deletion
+    n_before = len(df)
     sub = df[[outcome] + predictors].dropna()
+    rows_dropped = n_before - len(sub)
+
     if len(sub) < max(len(predictors) + 2, 10):
         raise ValueError(f"Too few complete observations: {len(sub)}")
 
@@ -126,11 +140,17 @@ def _fit_logistic(outcome: str, predictors: list[str], df: pd.DataFrame, ctx: Ag
         "outcome": outcome,
         "predictors": list(X.columns.tolist()),
         "n_observations": int(len(sub)),
+        "n_before_dropna": n_before,
+        "rows_dropped": rows_dropped,
         "pseudo_r2_mcfadden": round(float(model.prsquared), 4),
         "aic": round(float(model.aic), 4),
         "bic": round(float(model.bic), 4),
         "coefficients": coefs,
         "note": "Odds ratio > 1 means higher odds of outcome for higher predictor values.",
+        "listwise_deletion": {
+            "rows_dropped": rows_dropped,
+            "note": "Rows with missing values in outcome or predictors were excluded.",
+        },
     }
 
 
@@ -145,7 +165,10 @@ def _fit_cox(params: RegressionParams, df: pd.DataFrame, ctx: AgentContext) -> d
         if c not in df.columns:
             raise ValueError(f"Column '{c}' not found. Available: {ctx.column_names}")
 
+    # Track rows before and after listwise deletion
+    n_before = len(df)
     sub = df[required].dropna().copy()
+    rows_dropped_na = n_before - len(sub)
 
     if params.event_codes:
         sub["_event"] = sub[params.outcome_column].isin(params.event_codes).astype(int)
@@ -153,7 +176,9 @@ def _fit_cox(params: RegressionParams, df: pd.DataFrame, ctx: AgentContext) -> d
         sub["_event"] = pd.to_numeric(sub[params.outcome_column], errors="coerce").fillna(0).astype(int)
 
     T = pd.to_numeric(sub[params.time_column], errors="coerce")
+    n_after_dropna = len(sub)
     sub = sub[T > 0].copy()
+    rows_dropped_nonpositive = n_after_dropna - len(sub)
     sub["_event"] = sub["_event"].values  # ensure no index misalignment after filter
 
     cox_df = sub[[params.time_column, "_event"] + params.predictor_columns].rename(
@@ -193,11 +218,19 @@ def _fit_cox(params: RegressionParams, df: pd.DataFrame, ctx: AgentContext) -> d
         "event_column": params.outcome_column,
         "predictors": params.predictor_columns,
         "n_observations": int(len(sub)),
+        "n_before_dropna": n_before,
+        "rows_dropped": rows_dropped_na + rows_dropped_nonpositive,
         "n_events": int(sub["_event"].sum()),
         "concordance_index": round(float(cph.concordance_index_), 4),
         "log_likelihood": round(float(cph.log_likelihood_), 4),
         "coefficients": coefs,
         "note": "HR > 1 = higher hazard (worse survival) for higher predictor values.",
+        "listwise_deletion": {
+            "rows_dropped_missing": rows_dropped_na,
+            "rows_dropped_nonpositive_time": rows_dropped_nonpositive,
+            "total_rows_dropped": rows_dropped_na + rows_dropped_nonpositive,
+            "note": "Rows with missing values or non-positive time were excluded.",
+        },
     }
 
 

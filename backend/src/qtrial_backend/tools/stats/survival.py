@@ -73,6 +73,7 @@ def _survival_at(kmf, t: float) -> float | None:  # type: ignore[no-untyped-def]
 )
 def survival_analysis(params: SurvivalParams, ctx: AgentContext) -> dict:
     df = ctx.dataframe.copy()
+    n_before = len(df)
 
     for col in (params.time_column, params.event_column):
         if col not in df.columns:
@@ -86,10 +87,15 @@ def survival_analysis(params: SurvivalParams, ctx: AgentContext) -> dict:
     else:
         df["_event"] = pd.to_numeric(df[params.event_column], errors="coerce").fillna(0).astype(int)
 
+    # Track rows dropped by listwise deletion
     df = df[[params.time_column, "_event"] + ([params.group_column] if params.group_column else [])].dropna()
+    rows_dropped_na = n_before - len(df)
+
     T = pd.to_numeric(df[params.time_column], errors="coerce")
     E = df["_event"]
+    n_after_dropna = len(df)
     df = df[T > 0]
+    rows_dropped_nonpositive = n_after_dropna - len(df)
     T = pd.to_numeric(df[params.time_column], errors="coerce")
     E = df["_event"]
 
@@ -97,9 +103,17 @@ def survival_analysis(params: SurvivalParams, ctx: AgentContext) -> dict:
         "time_column": params.time_column,
         "event_column": params.event_column,
         "n_total": int(len(T)),
+        "n_before_dropna": n_before,
+        "rows_dropped": rows_dropped_na + rows_dropped_nonpositive,
         "n_events": int(E.sum()),
         "n_censored": int((E == 0).sum()),
         "event_rate_pct": round(float(E.mean() * 100), 2),
+        "listwise_deletion": {
+            "rows_dropped_missing": rows_dropped_na,
+            "rows_dropped_nonpositive_time": rows_dropped_nonpositive,
+            "total_rows_dropped": rows_dropped_na + rows_dropped_nonpositive,
+            "note": "Rows with missing time/event or non-positive time values were excluded.",
+        },
     }
 
     # Overall KM
