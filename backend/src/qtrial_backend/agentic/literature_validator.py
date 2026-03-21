@@ -1,5 +1,5 @@
 """
-Literature Validator Pipeline.
+Literature Grounder.
 
 Wraps PubMed (existing), Cochrane Library (new), and ClinicalTrials.gov (new)
 into a single pipeline that:
@@ -75,7 +75,7 @@ def _to_literature_article(raw: dict, source: str, alias: str) -> LiteratureArti
     )
 
 
-class LiteratureValidatorPipeline:
+class LiteratureGrounder:
     """
     Session-scoped pipeline for multi-source literature validation.
 

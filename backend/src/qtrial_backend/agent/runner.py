@@ -3,7 +3,7 @@ Statistical Agent Loop runner.
 
 Runs AgentLoop (LLM-driven iterative tool calling) on a dataset,
 producing a Markdown analysis report and tool_log that feed directly
-into run_agentic_insights() as `analysis_report` and `tool_log`.
+into run_pipeline() as `analysis_report` and `tool_log`.
 """
 from __future__ import annotations
 

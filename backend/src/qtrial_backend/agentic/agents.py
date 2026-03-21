@@ -8,7 +8,7 @@ from qtrial_backend.agentic.schemas import (
     DataQualityOutput,
     ClinicalSemanticsOutput,
     UnknownsOutput,
-    InsightSynthesisOutput,
+    SynthesisInsights,
     PlanStep,
     ToolCallRecord,
 )
@@ -81,7 +81,7 @@ def _repair_truncated_json(raw: str) -> str:
     return combined
 
 
-def _call_llm_for_json(
+def call_llm_structured(
     provider: ProviderName,
     system: str,
     user: str,
@@ -245,7 +245,7 @@ _DQ_USER = textwrap.dedent("""\
 """)
 
 
-def run_data_quality_agent(
+def assess_data_quality(
     preview: dict,
     evidence: dict,
     step: PlanStep,
@@ -261,7 +261,7 @@ def run_data_quality_agent(
         preview=json.dumps(preview, indent=2, ensure_ascii=False),
         evidence=json.dumps(evidence, indent=2, ensure_ascii=False),
     )
-    return _call_llm_for_json(provider, _DQ_SYSTEM, user, DataQualityOutput)
+    return call_llm_structured(provider, _DQ_SYSTEM, user, DataQualityOutput)
 
 
 # ── ClinicalSemanticsAgent ────────────────────────────────────────────────────
@@ -308,7 +308,7 @@ _CS_USER = textwrap.dedent("""\
 """)
 
 
-def run_clinical_semantics_agent(
+def interpret_column_semantics(
     preview: dict,
     evidence: dict,
     step: PlanStep,
@@ -339,7 +339,7 @@ def run_clinical_semantics_agent(
         preview=json.dumps(preview, indent=2, ensure_ascii=False),
         evidence=json.dumps(evidence, indent=2, ensure_ascii=False),
     )
-    return _call_llm_for_json(provider, _CS_SYSTEM, user, ClinicalSemanticsOutput)
+    return call_llm_structured(provider, _CS_SYSTEM, user, ClinicalSemanticsOutput)
 
 
 # ── UnknownsAgent ─────────────────────────────────────────────────────────────
@@ -452,7 +452,7 @@ _UA_USER = textwrap.dedent("""\
 """)
 
 
-def run_unknowns_agent(
+def surface_unknowns(
     preview: dict,
     evidence: dict,
     dq_output: dict | None,
@@ -472,7 +472,7 @@ def run_unknowns_agent(
         dq_output=json.dumps(dq_output or {}, indent=2, ensure_ascii=False),
         cs_output=json.dumps(cs_output or {}, indent=2, ensure_ascii=False),
     )
-    return _call_llm_for_json(provider, _UA_SYSTEM, user, UnknownsOutput)
+    return call_llm_structured(provider, _UA_SYSTEM, user, UnknownsOutput)
 
 
 # ── InsightSynthesisAgent ─────────────────────────────────────────────────────
@@ -556,7 +556,7 @@ def _build_citation_block(citations: dict[str, list[str]]) -> str:
     return "\n".join(lines) if lines else "      (none computed)"
 
 
-def run_insight_synthesis_agent(
+def synthesise_insights(
     preview: dict,
     evidence: dict,
     dq_output: dict | None,
@@ -568,7 +568,7 @@ def run_insight_synthesis_agent(
     prior_analysis_report: str | None = None,
     tool_log: list[ToolCallRecord] | None = None,
     study_context: str | None = None,
-) -> InsightSynthesisOutput:
+) -> SynthesisInsights:
     prior_block = _build_prior_analysis_block(prior_analysis_report, tool_log)
     citation_block = _build_citation_block(citations or {})
     tool_log_citations = _build_tool_log_citation_hints(tool_log)
@@ -586,4 +586,4 @@ def run_insight_synthesis_agent(
         cs_output=json.dumps(cs_output or {}, indent=2, ensure_ascii=False),
         unknowns_output=json.dumps(unknowns_output or {}, indent=2, ensure_ascii=False),
     )
-    return _call_llm_for_json(provider, _IS_SYSTEM, user, InsightSynthesisOutput)
+    return call_llm_structured(provider, _IS_SYSTEM, user, SynthesisInsights)

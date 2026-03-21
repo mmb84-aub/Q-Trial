@@ -211,7 +211,7 @@ def test_property_3_dominant_group_not_detected(n_rows: int) -> None:
 
 # ── Feature: clinical-data-analyst-agent, Property 23: Treatment blinding confirmation in report ──
 
-from qtrial_backend.agentic.schemas import FinalReportSchema
+from qtrial_backend.agentic.schemas import AnalysisReport
 
 
 @settings(max_examples=50)
@@ -225,9 +225,9 @@ from qtrial_backend.agentic.schemas import FinalReportSchema
 def test_property_23_treatment_columns_excluded_field_present(cols: list[str]) -> None:
     # Feature: clinical-data-analyst-agent, Property 23: Treatment blinding confirmation in report
     # Validates: Requirements 9.4, 9.5
-    # FinalReportSchema must always have treatment_columns_excluded (even if empty)
+    # AnalysisReport must always have treatment_columns_excluded (even if empty)
     # We verify the field exists and is a list
-    schema_fields = FinalReportSchema.model_fields
+    schema_fields = AnalysisReport.model_fields
     assert "treatment_columns_excluded" in schema_fields
     # Default must be an empty list (not None)
     default = schema_fields["treatment_columns_excluded"].default_factory  # type: ignore[union-attr]
@@ -238,7 +238,7 @@ def test_property_23_treatment_columns_excluded_field_present(cols: list[str]) -
 # ── Feature: clinical-data-analyst-agent, Property 18: Research questions in report question bank ──
 
 from qtrial_backend.agentic.schemas import (
-    GroundedFindingsSchema, GroundedFinding, ResearchQuestion, SynthesisOutput
+    GroundedFindings, GroundedFinding, ResearchQuestion, SynthesisOutput
 )
 
 
@@ -257,9 +257,9 @@ from qtrial_backend.agentic.schemas import (
 def test_property_18_research_questions_serialise_roundtrip(questions: list[ResearchQuestion]) -> None:
     # Feature: clinical-data-analyst-agent, Property 18: Research questions in report question bank
     # Validates: Requirements 6.4, 7.5
-    schema = GroundedFindingsSchema(research_questions=questions)
+    schema = GroundedFindings(research_questions=questions)
     dumped = schema.model_dump()
-    restored = GroundedFindingsSchema.model_validate(dumped)
+    restored = GroundedFindings.model_validate(dumped)
     assert len(restored.research_questions) == len(questions)
     for orig, rest in zip(questions, restored.research_questions):
         assert orig.question == rest.question

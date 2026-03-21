@@ -61,7 +61,7 @@ _ADL_ENTRIES: list[dict] = [
             "case-insensitive), and (2) cardinality check (2–5 unique values, no "
             "single value exceeding 60% of rows). Detected columns are excluded from "
             "all statistical analyses and listed in treatment_columns_excluded on the "
-            "FinalReportSchema. The user is shown the detected columns and may override "
+            "AnalysisReport. The user is shown the detected columns and may override "
             "before the pipeline runs."
         ),
         "alternatives": [
@@ -269,7 +269,7 @@ _ADL_ENTRIES: list[dict] = [
             "registered trials including unpublished results."
         ),
         "decision": (
-            "LiteratureValidatorPipeline queries all four sources (PubMed, Semantic "
+            "LiteratureGrounder queries all four sources (PubMed, Semantic "
             "Scholar, Cochrane, ClinicalTrials.gov) for each Clinical Search Term. "
             "Per-source rate limiting is enforced (PubMed 0.35s, Cochrane 1.0s, "
             "ClinicalTrials 0.5s). Exponential backoff (1s/2s/4s, max 3 retries) "

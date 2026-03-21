@@ -93,7 +93,7 @@ def _strip_fences(text: str) -> str:
 
 
 def run_judge_agent(
-    final_insights: Any,   # InsightSynthesisOutput or dict
+    final_insights: Any,   # SynthesisInsights or dict
     evidence: dict[str, Any],
     unknowns: Any,          # UnknownsOutput or dict
     provider: ProviderName,

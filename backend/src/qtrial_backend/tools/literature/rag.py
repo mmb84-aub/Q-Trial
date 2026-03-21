@@ -54,7 +54,7 @@ class LiteratureArticle(BaseModel):
 class LiteratureRAGReport(BaseModel):
     """
     Aggregated results from hypothesis-driven literature retrieval (Task 6).
-    Stored in FinalReportSchema.literature_report.
+    Stored in AnalysisReport.literature_report.
     """
     articles: list[LiteratureArticle] = Field(default_factory=list)
     queries_used: list[str] = Field(default_factory=list)

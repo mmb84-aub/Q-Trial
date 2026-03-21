@@ -82,7 +82,7 @@ class RepeatedMeasuresSchema(BaseModel):
 class GuardrailReport(BaseModel):
     """
     Aggregated results from all four Task 5 robustness guardrail checks.
-    Stored in FinalReportSchema and injected into evidence so all agents
+    Stored in AnalysisReport and injected into evidence so all agents
     can cite ``guardrails[i]`` and ``guardrails.repeated_measures``.
     """
     flags: list[GuardrailFlag] = Field(default_factory=list)
@@ -169,7 +169,7 @@ class RankedAnalysis(BaseModel):
     evidence_citation: str
 
 
-class InsightSynthesisOutput(BaseModel):
+class SynthesisInsights(BaseModel):
     key_findings: list[str]
     risks_and_bias_signals: list[str]
     recommended_next_analyses: list[RankedAnalysis]
@@ -568,7 +568,7 @@ class HypothesisGenerationOutput(BaseModel):
 class ReasoningState(BaseModel):
     """
     Full structured reasoning state for one pipeline run.
-    Persisted under FinalReportSchema.reasoning_state.
+    Persisted under AnalysisReport.reasoning_state.
     All lists default to empty so early-stage runs can be serialised
     without requiring downstream state to be populated.
     """
@@ -658,18 +658,18 @@ class AgentRunRecord(BaseModel):
     output: dict[str, Any]
 
 
-class FinalReportSchema(BaseModel):
+class AnalysisReport(BaseModel):
     provider: str
     model: str
     plan: PlanSchema
     agent_runs: list[AgentRunRecord]
     unknowns: UnknownsOutput
-    final_insights: InsightSynthesisOutput
+    final_insights: SynthesisInsights
     judge: JudgeOutput | None = None
     # Closed-loop metadata fields (all None when no metadata supplied)
     metadata_used: MetadataInput | None = None
-    final_insights_before: InsightSynthesisOutput | None = None
-    final_insights_after: InsightSynthesisOutput | None = None
+    final_insights_before: SynthesisInsights | None = None
+    final_insights_after: SynthesisInsights | None = None
     judge_before: JudgeOutput | None = None
     judge_after: JudgeOutput | None = None
     # Upstream statistical context — None when not wired from AgentLoop
@@ -716,7 +716,7 @@ class FinalReportSchema(BaseModel):
         default=None,
         description="Plain-language study description provided by the clinician.",
     )
-    grounded_findings: GroundedFindingsSchema | None = Field(
+    grounded_findings: GroundedFindings | None = Field(
         default=None,
         description="Literature-grounded findings with synthesis outputs.",
     )
@@ -807,7 +807,7 @@ class MissingnessDisclosure(BaseModel):
     action: Literal["excluded", "high_missingness_section", "listwise_deletion"]
 
 
-class GroundedFindingsSchema(BaseModel):
+class GroundedFindings(BaseModel):
     findings: list[GroundedFinding] = Field(default_factory=list)
     research_questions: list[ResearchQuestion] = Field(default_factory=list)
     synthesis: SynthesisOutput | None = None

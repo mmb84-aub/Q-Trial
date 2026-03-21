@@ -69,7 +69,7 @@ export interface MissingnessDisclosure {
   action: "excluded" | "high_missingness_section" | "listwise_deletion";
 }
 
-export interface GroundedFindingsSchema {
+export interface GroundedFindings {
   findings: GroundedFinding[];
   research_questions: ResearchQuestion[];
   synthesis: SynthesisOutput | null;
@@ -83,7 +83,7 @@ export interface SynthesisQualityScore {
   rerun_triggered: boolean;
 }
 
-export interface InsightSynthesisOutput {
+export interface SynthesisInsights {
   key_findings: string[];
   risks_and_bias_signals: string[];
   recommended_next_analyses: Array<{ rank: number; analysis: string; rationale: string; evidence_citation: string }>;
@@ -96,10 +96,10 @@ export interface FinalReport {
   provider: string;
   model: string;
   study_context: string | null;
-  grounded_findings: GroundedFindingsSchema | null;
+  grounded_findings: GroundedFindings | null;
   synthesis_quality_score: SynthesisQualityScore | null;
   treatment_columns_excluded: string[];
-  final_insights: InsightSynthesisOutput;
+  final_insights: SynthesisInsights;
   // run_id is derived from reproducibility_log if present
   reproducibility_log: { run_id: string } | null;
 }

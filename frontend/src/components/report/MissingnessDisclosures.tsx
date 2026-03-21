@@ -1,7 +1,7 @@
-import type { GroundedFindingsSchema } from "../../types";
+import type { GroundedFindings } from "../../types";
 
 interface Props {
-  groundedFindings: GroundedFindingsSchema;
+  groundedFindings: GroundedFindings;
 }
 
 export function MissingnessDisclosures({ groundedFindings }: Props) {
