@@ -43,17 +43,32 @@ def translate_findings_to_cst(
     findings: list[str],
     study_context: str,
     provider: ProviderName = "gemini",
+    max_terms: int = 10,
 ) -> list[ClinicalSearchTerm]:
     """
     Translate each statistical finding into a ClinicalSearchTerm.
 
+    Capped at *max_terms* findings (most informative first).
+    Translations run in parallel (up to 8 threads) to reduce wall time.
+
     On LLM failure for any individual finding, sets translation_failed=True
     and attaches a failure_note; processing continues for remaining findings.
     """
-    client = get_client(provider)
-    results: list[ClinicalSearchTerm] = []
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    for finding in findings:
+    client = get_client(provider)
+    # Deduplicate and cap
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for f in findings:
+        key = f.strip().lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(f)
+        if len(deduped) >= max_terms:
+            break
+
+    def _translate_one(finding: str) -> ClinicalSearchTerm:
         user_prompt = (
             f"Study context: {study_context}\n\n"
             f"Statistical finding: {finding}\n\n"
@@ -64,7 +79,6 @@ def translate_findings_to_cst(
             user_prompt=user_prompt,
             payload={"temperature": 0},
         )
-
         try:
             resp = client.generate(req)
             raw = resp.text.strip().strip("```json").strip("```").strip()
@@ -72,25 +86,28 @@ def translate_findings_to_cst(
             term = data.get("term", "").strip()
             if not term:
                 raise ValueError("Empty term returned")
-            results.append(
-                ClinicalSearchTerm(
-                    source_finding=finding,
-                    term=term,
-                    study_context_used=study_context,
-                )
+            return ClinicalSearchTerm(
+                source_finding=finding,
+                term=term,
+                study_context_used=study_context,
             )
         except Exception as exc:
-            results.append(
-                ClinicalSearchTerm(
-                    source_finding=finding,
-                    term="",
-                    study_context_used=study_context,
-                    translation_failed=True,
-                    failure_note=(
-                        f"Literature grounding was not performed for this finding "
-                        f"because the search term translation step encountered an error: {exc}"
-                    ),
-                )
+            return ClinicalSearchTerm(
+                source_finding=finding,
+                term="",
+                study_context_used=study_context,
+                translation_failed=True,
+                failure_note=(
+                    f"Literature grounding was not performed for this finding "
+                    f"because the search term translation step encountered an error: {exc}"
+                ),
             )
 
-    return results
+    # Preserve input order in results
+    results: list[ClinicalSearchTerm | None] = [None] * len(deduped)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_translate_one, f): i for i, f in enumerate(deduped)}
+        for fut in as_completed(futures):
+            results[futures[fut]] = fut.result()
+
+    return [r for r in results if r is not None]

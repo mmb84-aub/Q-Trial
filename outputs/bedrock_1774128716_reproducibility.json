@@ -1,0 +1,227 @@
+{
+  "run_id": "bedrock_1774128716",
+  "timestamp": "2026-03-21T21:32:35.767665+00:00",
+  "study_context": "pbc data to see for any new findings",
+  "seed": 42,
+  "llm_calls": [],
+  "literature_queries": [
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cholangitis categorical variables clinical outcomes",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis patient demographics cohort characteristics",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis disease status outcomes prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis data quality missing values clinical outcomes",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis data quality missing values clinical outcomes",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cholangitis D-penicillamine treatment randomized controlled trial",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis treatment allocation randomization",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cholangitis PBC data quality integrity validation",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis clinical data biochemical markers liver function",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis treatment allocation randomization",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cholangitis categorical variables clinical outcomes",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cholangitis age demographics clinical characteristics",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cirrhosis time follow-up duration prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "clinicaltrials",
+      "query_string": "primary biliary cholangitis age demographics clinical characteristics",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cholangitis D-penicillamine treatment randomized controlled trial",
+      "results_count": 5,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis time follow-up duration prognosis",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cholangitis PBC data quality integrity validation",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis disease status outcomes prognosis",
+      "results_count": 5,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis clinical data biochemical markers liver function",
+      "results_count": 0,
+      "cached": false,
+      "error": null
+    },
+    {
+      "source": "pubmed",
+      "query_string": "primary biliary cirrhosis patient demographics cohort characteristics",
+      "results_count": 5,
+      "cached": false,
+      "error": null
+    }
+  ],
+  "clinical_search_terms": [
+    {
+      "source_finding": "search_pubmed: \"{\\\"query\\\": \\\"Primary biliary cholangitis D-penicillamine treatment randomized trial\\\", \\\"total_found\\\": 37, \\\"results\\\": [{\\\"pmid\\\": \\\"28417463\\\", \\\"title\\\": \\\"Pharmacological interventions for prim",
+      "term": "primary biliary cholangitis D-penicillamine treatment randomized controlled trial",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "duplicate_checks: \"{\\\"error\\\": \\\"Subject column '[\\\\\\\"id\\\\\\\"]' not found. Available: ['id', 'time', 'status', 'trt', 'age', 'sex', 'ascites', 'hepato', 'spiders', 'edema', 'bili', 'chol', 'albumin', 'copper', 'alk.phos",
+      "term": "primary biliary cirrhosis clinical data biochemical markers liver function",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "type_coercion_suggestions: \"{\\\"n_columns_scanned\\\": 20, \\\"n_flagged\\\": 4, \\\"suggestions\\\": [{\\\"column\\\": \\\"status\\\", \\\"current_dtype\\\": \\\"int64\\\", \\\"suggestion\\\": \\\"consider_as_categorical\\\", \\\"reason\\\": \\\"Only 2 unique integer",
+      "term": "primary biliary cholangitis categorical variables clinical outcomes",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "missing_data_patterns: \"{\\\"total_rows\\\": 418, \\\"total_cols\\\": 20, \\\"rows_with_any_null\\\": 142, \\\"complete_rows\\\": 276, \\\"per_column\\\": {\\\"id\\\": {\\\"null_count\\\": 0, \\\"null_pct\\\": 0.0}, \\\"time\\\": {\\\"null_count\\\": 0, \\\"null_pc",
+      "term": "primary biliary cirrhosis data quality missing values clinical outcomes",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "duplicate_checks: \"{\\\"n_total_rows\\\": 418, \\\"exact_duplicates\\\": {\\\"count\\\": 0, \\\"pct\\\": 0.0, \\\"example_indices\\\": []}, \\\"key_column_duplicates\\\": {\\\"key_columns\\\": [\\\"id\\\"], \\\"n_duplicated_rows\\\": 0, \\\"pct\\\": 0.0, \\\"n",
+      "term": "primary biliary cholangitis PBC data quality integrity validation",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "column_detailed_stats: \"{\\\"column\\\": \\\"id\\\", \\\"dtype\\\": \\\"int64\\\", \\\"count\\\": 418, \\\"null_count\\\": 0, \\\"null_pct\\\": 0.0, \\\"unique_count\\\": 418, \\\"mean\\\": 209.5, \\\"std\\\": 120.8105, \\\"min\\\": 1.0, \\\"max\\\": 418.0, \\\"percentile_",
+      "term": "primary biliary cirrhosis patient demographics cohort characteristics",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "column_detailed_stats: \"{\\\"column\\\": \\\"time\\\", \\\"dtype\\\": \\\"int64\\\", \\\"count\\\": 418, \\\"null_count\\\": 0, \\\"null_pct\\\": 0.0, \\\"unique_count\\\": 399, \\\"mean\\\": 1917.7823, \\\"std\\\": 1104.673, \\\"min\\\": 41.0, \\\"max\\\": 4795.0, \\\"per",
+      "term": "primary biliary cirrhosis time follow-up duration prognosis",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "column_detailed_stats: \"{\\\"column\\\": \\\"status\\\", \\\"dtype\\\": \\\"int64\\\", \\\"count\\\": 418, \\\"null_count\\\": 0, \\\"null_pct\\\": 0.0, \\\"unique_count\\\": 2, \\\"mean\\\": 0.89, \\\"std\\\": 0.9951, \\\"min\\\": 0.0, \\\"max\\\": 2.0, \\\"percentile_5\\\"",
+      "term": "primary biliary cirrhosis disease status outcomes prognosis",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "column_detailed_stats: \"{\\\"column\\\": \\\"trt\\\", \\\"dtype\\\": \\\"float64\\\", \\\"count\\\": 312, \\\"null_count\\\": 106, \\\"null_pct\\\": 25.36, \\\"unique_count\\\": 2, \\\"mean\\\": 1.4936, \\\"std\\\": 0.5008, \\\"min\\\": 1.0, \\\"max\\\": 2.0, \\\"percentil",
+      "term": "primary biliary cirrhosis treatment allocation randomization",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    },
+    {
+      "source_finding": "column_detailed_stats: \"{\\\"column\\\": \\\"age\\\", \\\"dtype\\\": \\\"float64\\\", \\\"count\\\": 418, \\\"null_count\\\": 0, \\\"null_pct\\\": 0.0, \\\"unique_count\\\": 344, \\\"mean\\\": 50.7416, \\\"std\\\": 10.4472, \\\"min\\\": 26.2779, \\\"max\\\": 78.4394, \\\"p",
+      "term": "primary biliary cholangitis age demographics clinical characteristics",
+      "study_context_used": "pbc data to see for any new findings",
+      "translation_failed": false,
+      "failure_note": null
+    }
+  ],
+  "tool_call_log": [],
+  "synthesis_quality_score": {
+    "score": 0.92,
+    "rationale": "Completeness: All five required fields are comprehensively populated with specific, non-empty content (1.0/1.0). Clinical relevance: Recommendations directly address PBC management challenges including immunomodulatory therapy, composite endpoints reflecting transplant and decompensation risk, and biomarker-driven stratification highly relevant to the disease context (0.25/0.25). Plain language: The narrative_summary effectively communicates findings without statistical jargon or raw p-values, using accessible terms like 'strongly interrelated' and 'data gaps' instead of correlation coefficients (0.24/0.25; minor: one instance of 'intention-to-treat' could be simplified). Evidence grounding: All recommendations and research questions are explicitly tied to observed findings (e.g., copper ρ=0.45, bilirubin ρ=0.53, 25.4% missingness, 89.5% female predominance, stage range 1–4) rather than generic trial design advice (0.25/0.25).",
+    "rerun_triggered": false
+  }
+}

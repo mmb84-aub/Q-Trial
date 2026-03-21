@@ -49,6 +49,7 @@ export interface SynthesisOutput {
   recommended_sample_size: string;
   variables_to_control: ControlVariable[];
   research_questions: ResearchQuestion[];
+  narrative_summary: string;
 }
 
 export interface ExcludedColumn {

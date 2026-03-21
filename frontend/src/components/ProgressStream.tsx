@@ -2,17 +2,16 @@ import { useEffect } from "react";
 import { createParser } from "eventsource-parser";
 import type { FinalReport, PipelineAction } from "../types";
 
-// Maps backend stage names to what the user sees + a one-line explanation
+// Maps backend stage_complete stage keys to what the user sees + a one-line explanation.
+// Keys must match exactly what the backend emits in {"type":"stage_complete","stage":"<key>"}.
 const STAGE_INFO: Record<string, { label: string; detail: string }> = {
-  StaticAnalysis:         { label: "Statistical analysis",       detail: "Running deterministic tests on your dataset — no AI involved yet." },
-  DataQualityAgent:       { label: "Data quality check",         detail: "Flagging missing values, outliers, and structural issues." },
-  ClinicalSemanticsAgent: { label: "Column interpretation",      detail: "Inferring what each column represents clinically." },
-  UnknownsAgent:          { label: "Unknowns & assumptions",     detail: "Surfacing what the data can't tell us and what we're assuming." },
-  InsightSynthesisAgent:  { label: "Synthesising insights",      detail: "Combining all findings into a coherent clinical narrative." },
-  CSTTranslation:         { label: "Clinical search terms",      detail: "Translating statistical findings into literature search queries." },
-  LiteratureValidation:   { label: "Literature validation",      detail: "Checking findings against PubMed, Cochrane, and ClinicalTrials.gov." },
-  SynthesisScoring:       { label: "Quality check",              detail: "Self-scoring the synthesis — re-running if it falls below threshold." },
-  ReproducibilityLog:     { label: "Reproducibility log",        detail: "Recording every LLM call and query so the run can be audited." },
+  StaticAnalysis:       { label: "Deterministic profiling",    detail: "Running data quality checks, missingness analysis, and outlier detection — no AI involved." },
+  StatisticalLoop:      { label: "Statistical analysis",       detail: "AI agent iteratively selects and runs statistical tests suited to your data." },
+  dataset:              { label: "Evidence & guardrails",      detail: "Building the evidence profile and running robustness checks on the dataset." },
+  cst_translation:      { label: "Clinical search terms",      detail: "Translating statistical findings into clinical search phrases for literature queries." },
+  literature_validation:{ label: "Literature validation",      detail: "Checking findings against PubMed, Cochrane, and ClinicalTrials.gov." },
+  synthesis:            { label: "Synthesis",                  detail: "Producing grounding status, evidence strength, recommendations, and narrative summary." },
+  synthesis_scoring:    { label: "Quality check",              detail: "Self-scoring the synthesis — re-running if quality falls below threshold." },
 };
 
 interface Props {
@@ -93,11 +92,7 @@ export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmen
     };
   }, []); // intentionally run once on mount
 
-  // When a column dictionary is provided the agent still runs internally,
-  // but the user already knows what the columns mean — hide that step.
-  const allStages = Object.keys(STAGE_INFO).filter(
-    (s) => !(s === "ClinicalSemanticsAgent" && dictFile)
-  );
+  const allStages = Object.keys(STAGE_INFO);
   const doneSet = new Set(progressMessages);
   // The "current" stage is the first one not yet done
   const currentIdx = allStages.findIndex((s) => !doneSet.has(s));

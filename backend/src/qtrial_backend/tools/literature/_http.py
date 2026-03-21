@@ -10,7 +10,7 @@ def get_http_client() -> httpx.Client:
     global _client
     if _client is None:
         _client = httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=10.0),
+            timeout=httpx.Timeout(8.0, connect=5.0),
             headers={"User-Agent": "Q-Trial/0.1 (clinical-trial-analyser)"},
         )
     return _client

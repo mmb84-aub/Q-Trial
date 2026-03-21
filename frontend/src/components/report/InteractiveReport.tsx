@@ -72,10 +72,18 @@ export function InteractiveReport({ report, onReset }: Props) {
 
       {gf && (
         <QuestionBank
-          questions={[
-            ...gf.research_questions,
-            ...(gf.synthesis?.research_questions ?? []),
-          ]}
+          questions={(() => {
+            const seen = new Set<string>();
+            return [
+              ...gf.research_questions,
+              ...(gf.synthesis?.research_questions ?? []),
+            ].filter(q => {
+              const key = q.question.trim().toLowerCase();
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+          })()}
         />
       )}
 

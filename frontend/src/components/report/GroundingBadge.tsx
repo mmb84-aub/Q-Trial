@@ -27,7 +27,6 @@ export function GroundingBadge({ finding }: Props) {
       }}
     >
       {finding.grounding_status}
-      {finding.evidence_strength && ` — ${finding.evidence_strength.plain_language}`}
     </span>
   );
 }

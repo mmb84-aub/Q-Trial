@@ -26,7 +26,11 @@ from qtrial_backend.tools.registry import ToolRegistry
 console = Console()
 
 
-def _build_initial_message(df: pd.DataFrame, dataset_name: str) -> str:
+def _build_initial_message(
+    df: pd.DataFrame,
+    dataset_name: str,
+    column_dict: dict[str, str] | None = None,
+) -> str:
     """Format the standard initial user message for AgentLoop."""
     schema_lines = [f"  {col} ({dtype})" for col, dtype in df.dtypes.items()]
     schema = "\n".join(schema_lines)
@@ -37,12 +41,26 @@ def _build_initial_message(df: pd.DataFrame, dataset_name: str) -> str:
         ensure_ascii=False,
     )
 
+    # Inject column dictionary as authoritative definitions so the agent
+    # never asks about coding that is already documented (e.g. status=2).
+    if column_dict:
+        dict_lines = "\n".join(f"  {col}: {desc}" for col, desc in column_dict.items())
+        column_descriptions = (
+            "\nAUTHORITATIVE COLUMN DICTIONARY "
+            "(treat these definitions as ground truth — do NOT ask about coding "
+            "or meaning for any column listed here):\n"
+            + dict_lines
+            + "\n"
+        )
+    else:
+        column_descriptions = ""
+
     return INITIAL_USER_MESSAGE_TEMPLATE.format(
         dataset_name=dataset_name,
         rows=len(df),
         cols=len(df.columns),
         schema=schema,
-        column_descriptions="",  # no data-dict wired here; AgentLoop can use retrieve_evidence
+        column_descriptions=column_descriptions,
         preview_json=preview,
     )
 
@@ -53,6 +71,7 @@ def run_statistical_agent_loop(
     dataset_name: str,
     emit: Callable | None = None,
     model: str | None = None,
+    column_dict: dict[str, str] | None = None,
 ) -> tuple[str, list[dict]]:
     """
     Run the LLM-driven statistical AgentLoop on df.
@@ -86,7 +105,7 @@ def run_statistical_agent_loop(
         except Exception:
             pass
 
-    initial_message = _build_initial_message(df, dataset_name)
+    initial_message = _build_initial_message(df, dataset_name, column_dict)
 
     loop = AgentLoop(
         client=client,

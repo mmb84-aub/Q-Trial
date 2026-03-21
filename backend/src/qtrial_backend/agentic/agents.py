@@ -383,7 +383,10 @@ _UA_SYSTEM = textwrap.dedent("""\
       on records, or self-reported? Could outcome misclassification be a concern?
 
     DO NOT ASK ABOUT:
-    - What numeric codes (0, 1, 2…) mean — assume standard conventions or what __user_metadata__ states.
+    - What numeric codes (0, 1, 2…) mean — assume standard conventions, what __user_metadata__ states,
+      OR what the __column_dict__ in the evidence JSON describes. If a column's description in
+      __column_dict__ already explains the coding (e.g. "0=censored, 1=transplant, 2=dead"), treat
+      that as resolved and do NOT ask about it.
     - Column units or measurement scales — data engineering questions, not clinical ones.
     - Whether a formal SAP exists, was locked, or how randomisation was performed.
     - Anything already answered in the __user_metadata__ block.

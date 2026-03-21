@@ -200,7 +200,7 @@ class AgentLoop:
                         )
                     )
                     final = self.client.chat(
-                        messages=messages, system=self.system_prompt
+                        messages=messages, tools=self.tools, system=self.system_prompt
                     )
                     return AgentResponse(
                         provider=final.provider,
@@ -222,7 +222,7 @@ class AgentLoop:
                 ),
             )
         )
-        final = self.client.chat(messages=messages, system=self.system_prompt)
+        final = self.client.chat(messages=messages, tools=self.tools, system=self.system_prompt)
         return AgentResponse(
             provider=final.provider,
             model=final.model,

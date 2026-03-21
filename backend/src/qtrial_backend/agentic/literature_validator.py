@@ -32,9 +32,7 @@ from qtrial_backend.tools.literature.rag import LiteratureArticle
 # Default minimum delays between successive calls per source (seconds)
 _DEFAULT_DELAYS: dict[str, float] = {
     "pubmed": 0.35,
-    "cochrane": 1.0,
     "clinicaltrials": 0.5,
-    "semantic_scholar": 0.5,
 }
 
 _GROUNDING_SYSTEM = """\
@@ -128,7 +126,7 @@ class LiteratureValidatorPipeline:
             return [], False, f"Unknown source: {source}"
 
         last_error: str | None = None
-        for attempt, wait in enumerate([1, 2, 4]):
+        for attempt, wait in enumerate([0, 1, 2]):
             try:
                 self._rate_limit(source)
                 results = fetcher(query)
@@ -182,43 +180,58 @@ class LiteratureValidatorPipeline:
         """
         Run the full validation pipeline for a list of ClinicalSearchTerms.
         Returns one GroundedFinding per CST.
-        """
-        grounded: list[GroundedFinding] = []
-        article_counter = 0
 
-        for cst in csts:
-            # Skip findings where CST translation failed
+        Fetches from all three sources in parallel per CST (up to 6 threads),
+        then runs grounding LLM calls in parallel (up to 8 threads).
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        article_counter = 0
+        article_lock = __import__("threading").Lock()
+
+        def _next_alias() -> str:
+            nonlocal article_counter
+            with article_lock:
+                alias = f"lit[{article_counter}]"
+                article_counter += 1
+            return alias
+
+        def _fetch_one_cst(cst: ClinicalSearchTerm) -> GroundedFinding:
             if cst.translation_failed:
-                grounded.append(
-                    GroundedFinding(
-                        finding_text=cst.source_finding,
-                        grounding_status="Novel",
-                        literature_skipped=True,
-                        literature_skip_note=cst.failure_note,
-                    )
+                return GroundedFinding(
+                    finding_text=cst.source_finding,
+                    grounding_status="Novel",
+                    literature_skipped=True,
+                    literature_skip_note=cst.failure_note,
                 )
-                continue
 
             all_articles: list[LiteratureArticle] = []
 
-            for source in ("pubmed", "cochrane", "clinicaltrials"):
-                raw_results, cached, error = self._fetch_with_backoff(source, cst.term)
+            # Fetch both sources in parallel
+            def _fetch_source(source: str) -> tuple[str, list[dict], bool, str | None]:
+                raw, cached, error = self._fetch_with_backoff(source, cst.term)
+                return source, raw, cached, error
 
-                self.query_records.append(
-                    LiteratureQueryRecord(
-                        source=source,  # type: ignore[arg-type]
-                        query_string=cst.term,
-                        results_count=len(raw_results),
-                        cached=cached,
-                        error=error,
-                    )
-                )
-
-                for raw in raw_results:
-                    alias = f"lit[{article_counter}]"
-                    article_counter += 1
-                    article = _to_literature_article(raw, source, alias)
-                    all_articles.append(article)
+            with ThreadPoolExecutor(max_workers=2) as src_pool:
+                src_futures = {
+                    src_pool.submit(_fetch_source, s): s
+                    for s in ("pubmed", "clinicaltrials")
+                }
+                for fut in as_completed(src_futures):
+                    source, raw_results, cached, error = fut.result()
+                    with article_lock:
+                        self.query_records.append(
+                            LiteratureQueryRecord(
+                                source=source,  # type: ignore[arg-type]
+                                query_string=cst.term,
+                                results_count=len(raw_results),
+                                cached=cached,
+                                error=error,
+                            )
+                        )
+                    for raw in raw_results:
+                        alias = _next_alias()
+                        all_articles.append(_to_literature_article(raw, source, alias))
 
             # Assign grounding status
             status, _rationale = self._assign_grounding_status(
@@ -226,7 +239,7 @@ class LiteratureValidatorPipeline:
             )
 
             # Score evidence strength per article
-            scored_articles = all_articles[:5]  # top 5 for the finding card
+            scored_articles = all_articles[:5]
             best_strength: EvidenceStrengthScore | None = None
             if scored_articles:
                 scores = [score_evidence_strength(a) for a in scored_articles]
@@ -240,14 +253,19 @@ class LiteratureValidatorPipeline:
                     "be a candidate for publication or further investigation."
                 )
 
-            grounded.append(
-                GroundedFinding(
-                    finding_text=cst.source_finding,
-                    grounding_status=status,  # type: ignore[arg-type]
-                    citations=scored_articles,
-                    evidence_strength=best_strength if status != "Novel" else None,
-                    novel_statement=novel_statement,
-                )
+            return GroundedFinding(
+                finding_text=cst.source_finding,
+                grounding_status=status,  # type: ignore[arg-type]
+                citations=scored_articles,
+                evidence_strength=best_strength if status != "Novel" else None,
+                novel_statement=novel_statement,
             )
 
-        return grounded
+        # Process all CSTs in parallel (up to 8 concurrent)
+        grounded: list[GroundedFinding | None] = [None] * len(csts)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_fetch_one_cst, cst): i for i, cst in enumerate(csts)}
+            for fut in as_completed(futures):
+                grounded[futures[fut]] = fut.result()
+
+        return [g for g in grounded if g is not None]

@@ -128,7 +128,7 @@ async def run_analysis(
     # ── Run LLM-driven statistical agent loop ────────────────────────────────
     try:
         loop_report, tool_log = await asyncio.to_thread(
-            run_statistical_agent_loop, df, provider, dataset_name
+            run_statistical_agent_loop, df, provider, dataset_name, None, None, column_dict
         )
     except Exception as exc:
         console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
@@ -249,7 +249,9 @@ async def run_analysis_stream(
             # ── 2. LLM-driven statistical agent loop ─────────────────────────
             try:
                 loop_report, tool_log = run_statistical_agent_loop(
-                    df, provider, dataset_name, emit=emit, model=model if provider in ("openrouter", "bedrock") else None
+                    df, provider, dataset_name, emit=emit,
+                    model=model if provider in ("openrouter", "bedrock") else None,
+                    column_dict=column_dict,
                 )
             except Exception as exc:
                 console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")

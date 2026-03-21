@@ -185,10 +185,6 @@ def _pubmed_fetch(query: str, max_results: int = 3) -> list[dict]:
         if not pmids:
             return []
 
-        # Small delay to respect NCBI polite rate (3 req/s without key)
-        if not api_key:
-            time.sleep(0.35)
-
         fetch_p: dict = {
             "db": "pubmed",
             "id": ",".join(pmids),

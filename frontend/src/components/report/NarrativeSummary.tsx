@@ -6,8 +6,11 @@ interface Props {
 }
 
 export function NarrativeSummary({ report }: Props) {
-  // Prefer prose narrative_summary from synthesis; fall back to key_findings list
-  const prose = report.final_insights.narrative_summary;
+  // Primary: prose narrative from synthesis (stored in grounded_findings.synthesis.narrative_summary)
+  // Fallback: key_findings list from final_insights (backward compat)
+  const prose =
+    report.grounded_findings?.synthesis?.narrative_summary ||
+    report.final_insights.narrative_summary;
   const findings = report.final_insights.key_findings;
   const risks = report.final_insights.risks_and_bias_signals;
 

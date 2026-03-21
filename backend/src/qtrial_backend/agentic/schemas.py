@@ -787,6 +787,10 @@ class SynthesisOutput(BaseModel):
     recommended_sample_size: str
     variables_to_control: list[ControlVariable] = Field(default_factory=list)
     research_questions: list[ResearchQuestion] = Field(default_factory=list)
+    narrative_summary: str = Field(
+        default="",
+        description="Plain-language prose overview produced by the synthesis LLM call.",
+    )
 
 
 class ExcludedColumn(BaseModel):
