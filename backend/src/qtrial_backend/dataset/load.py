@@ -64,6 +64,7 @@ def classify_missingness(df: pd.DataFrame) -> dict[str, MissingnessDisclosure]:
             missingness_rate=rate,
             rows_dropped=missing if action == "listwise_deletion" else 0,
             action=action,
+            excluded_from_primary_analysis=(action == "high_missingness_section"),
         )
 
     return result

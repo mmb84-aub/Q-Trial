@@ -37,12 +37,16 @@ from qtrial_backend.agentic.literature_validator import LiteratureValidatorPipel
 from qtrial_backend.agentic.reproducibility import ReproducibilityLogBuilder
 from qtrial_backend.agentic.schemas import (
     ControlVariable,
+    ExcludedColumn,
     FinalReportSchema,
     GroundedFinding,
     GroundedFindingsSchema,
     GuardrailReport,
+    HighMissingnessColumn,
+    ListwiseDeletionColumn,
     LiteratureRAGReport,
     MetadataInput,
+    MissingnessDisclosure,
     ResearchQuestion,
     SynthesisOutput,
     SynthesisQualityScore,
@@ -323,6 +327,7 @@ def run_agentic_insights(
     emit: Callable | None = None,
     study_context: str = "",
     column_dict: dict[str, str] | None = None,
+    missingness_disclosures: list[MissingnessDisclosure] | None = None,
 ) -> FinalReportSchema:
     """
     Run the Q-Trial pipeline as specified in the design document.
@@ -493,6 +498,29 @@ def run_agentic_insights(
                 findings=grounded_findings_list,
                 research_questions=synthesis_output.research_questions,
                 synthesis=synthesis_output,
+                excluded_columns=[
+                    ExcludedColumn(column=d.column, missingness_rate=d.missingness_rate)
+                    for d in (missingness_disclosures or [])
+                    if d.action == "excluded"
+                ],
+                high_missingness_columns=[
+                    HighMissingnessColumn(
+                        column=d.column,
+                        missingness_rate=d.missingness_rate,
+                        excluded_from_primary_analysis=d.excluded_from_primary_analysis,
+                    )
+                    for d in (missingness_disclosures or [])
+                    if d.action == "high_missingness_section"
+                ],
+                listwise_deletion_columns=[
+                    ListwiseDeletionColumn(
+                        column=d.column,
+                        missingness_rate=d.missingness_rate,
+                        rows_dropped=d.rows_dropped,
+                    )
+                    for d in (missingness_disclosures or [])
+                    if d.action == "listwise_deletion" and d.missingness_rate > 0
+                ],
             )
 
         except Exception as exc:

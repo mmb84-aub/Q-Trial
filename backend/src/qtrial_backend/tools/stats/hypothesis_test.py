@@ -36,8 +36,14 @@ def hypothesis_test(params: HypothesisTestParams, ctx: AgentContext) -> dict:
 
     mask_a = df[params.group_column].astype(str) == str(params.group_a)
     mask_b = df[params.group_column].astype(str) == str(params.group_b)
-    a = df.loc[mask_a, params.numeric_column].dropna().to_numpy(dtype=float)
-    b = df.loc[mask_b, params.numeric_column].dropna().to_numpy(dtype=float)
+
+    # Track rows before and after listwise deletion
+    a_raw = df.loc[mask_a, params.numeric_column]
+    b_raw = df.loc[mask_b, params.numeric_column]
+    a = a_raw.dropna().to_numpy(dtype=float)
+    b = b_raw.dropna().to_numpy(dtype=float)
+    rows_dropped_a = int(a_raw.isna().sum())
+    rows_dropped_b = int(b_raw.isna().sum())
 
     if len(a) < 2 or len(b) < 2:
         raise ValueError(
@@ -66,6 +72,8 @@ def hypothesis_test(params: HypothesisTestParams, ctx: AgentContext) -> dict:
         "group_a": {
             "label": str(params.group_a),
             "n": int(len(a)),
+            "n_before_dropna": int(len(a_raw)),
+            "rows_dropped": rows_dropped_a,
             "mean": round(float(np.mean(a)), 4),
             "std": round(float(np.std(a, ddof=1)), 4),
             "median": round(float(np.median(a)), 4),
@@ -73,6 +81,8 @@ def hypothesis_test(params: HypothesisTestParams, ctx: AgentContext) -> dict:
         "group_b": {
             "label": str(params.group_b),
             "n": int(len(b)),
+            "n_before_dropna": int(len(b_raw)),
+            "rows_dropped": rows_dropped_b,
             "mean": round(float(np.mean(b)), 4),
             "std": round(float(np.std(b, ddof=1)), 4),
             "median": round(float(np.median(b)), 4),
@@ -81,4 +91,8 @@ def hypothesis_test(params: HypothesisTestParams, ctx: AgentContext) -> dict:
         "p_value": round(float(p_value), 6),
         "significant": bool(p_value < params.alpha),
         "alpha": params.alpha,
+        "listwise_deletion": {
+            "total_rows_dropped": rows_dropped_a + rows_dropped_b,
+            "note": "Rows with missing values in numeric_column were excluded per group.",
+        },
     }

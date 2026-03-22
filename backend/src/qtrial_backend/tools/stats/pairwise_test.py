@@ -40,10 +40,18 @@ def pairwise_group_test(params: PairwiseTestParams, ctx: AgentContext) -> dict:
     if len(labels) < 2:
         raise ValueError(f"Need at least 2 groups in '{params.group_column}', found {len(labels)}.")
 
-    groups: dict[str, pd.Series] = {
-        str(lbl): df.loc[df[params.group_column] == lbl, params.numeric_column].dropna()
-        for lbl in labels
-    }
+    # Track rows before and after listwise deletion per group
+    groups: dict[str, pd.Series] = {}
+    group_rows_dropped: dict[str, int] = {}
+    group_n_before: dict[str, int] = {}
+    for lbl in labels:
+        raw = df.loc[df[params.group_column] == lbl, params.numeric_column]
+        clean = raw.dropna()
+        groups[str(lbl)] = clean
+        group_n_before[str(lbl)] = int(len(raw))
+        group_rows_dropped[str(lbl)] = int(raw.isna().sum())
+
+    total_rows_dropped = sum(group_rows_dropped.values())
     group_arrays = [g.to_numpy(dtype=float) for g in groups.values()]
 
     # Overall Kruskal-Wallis
@@ -95,4 +103,9 @@ def pairwise_group_test(params: PairwiseTestParams, ctx: AgentContext) -> dict:
         "bonferroni_alpha": round(bonferroni_alpha, 6),
         "n_comparisons": n_comparisons,
         "pairwise_results": pairwise,
+        "listwise_deletion": {
+            "rows_dropped_per_group": group_rows_dropped,
+            "total_rows_dropped": total_rows_dropped,
+            "note": "Rows with missing values in numeric_column were excluded per group.",
+        },
     }
