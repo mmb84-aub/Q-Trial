@@ -21,7 +21,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from rich.console import Console
 
 from qtrial_backend.agentic.orchestrator import run_agentic_insights
-from qtrial_backend.agentic.schemas import MetadataInput
+from qtrial_backend.agentic.schemas import MetadataInput, PriorReportNormalized
+from qtrial_backend.agentic.prior_report_parser import parse_prior_report_file
 from qtrial_backend.agent.runner import run_statistical_agent_loop
 from qtrial_backend.providers.gemini_client import set_thread_emit
 from qtrial_backend.providers.openrouter_client import set_thread_model as set_openrouter_model
@@ -89,6 +90,7 @@ async def run_analysis(
         None,
         description="Optional JSON string matching MetadataInput schema",
     ),
+    prior_report_file: UploadFile | None = File(None, description="Optional prior/external report file (.md, .txt, .json)"),
 ) -> JSONResponse:
     """
     Upload a dataset and run the full agentic pipeline.
@@ -105,6 +107,25 @@ async def run_analysis(
             df = pd.read_csv(io.BytesIO(content))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+
+    # ── Parse optional prior report file (if provided) ──────────────────────
+    prior_report = None
+    if prior_report_file is not None:
+        try:
+            prior_content = await prior_report_file.read()
+            # Write to temp file for parsing (parser expects a filesystem path)
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=Path(prior_report_file.filename or ".txt").suffix) as tmp:
+                tmp.write(prior_content)
+                tmp_path = tmp.name
+            try:
+                prior_report = parse_prior_report_file(tmp_path)
+            finally:
+                Path(tmp_path).unlink()  # Clean up temp file
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Could not parse prior report file: {exc}"
+            )
 
     # ── Parse optional metadata ──────────────────────────────────────────────
     meta: MetadataInput | None = None
@@ -154,6 +175,7 @@ async def run_analysis(
             None,
             study_context,
             column_dict,
+            prior_report,
         )
     except Exception as exc:
         raise HTTPException(
@@ -177,6 +199,7 @@ async def run_analysis_stream(
     ),
     confirmed_treatment_columns: list[str] = Form(default=[]),
     dict_file: UploadFile | None = File(None, description="Optional JSON column dictionary"),
+    prior_report_file: UploadFile | None = File(None, description="Optional prior/external report file (.md, .txt, .json)"),
 ) -> StreamingResponse:
     """
     Same as /api/run but streams Server-Sent Events so the frontend can show
@@ -195,6 +218,25 @@ async def run_analysis_stream(
             df = pd.read_csv(io.BytesIO(content))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+
+    # ── Parse optional prior report file (if provided) ──────────────────────
+    prior_report = None
+    if prior_report_file is not None:
+        try:
+            prior_content = await prior_report_file.read()
+            # Write to temp file for parsing (parser expects a filesystem path)
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=Path(prior_report_file.filename or ".txt").suffix) as tmp:
+                tmp.write(prior_content)
+                tmp_path = tmp.name
+            try:
+                prior_report = parse_prior_report_file(tmp_path)
+            finally:
+                Path(tmp_path).unlink()  # Clean up temp file
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Could not parse prior report file: {exc}"
+            )
 
     meta: MetadataInput | None = None
     if metadata_json:
@@ -272,7 +314,7 @@ async def run_analysis_stream(
             report = run_agentic_insights(
                 df, provider, max_rows, 30, run_judge, meta, False,
                 analysis_report, tool_log, emit,
-                study_context, column_dict,
+                study_context, column_dict, prior_report,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

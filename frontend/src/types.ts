@@ -93,12 +93,39 @@ export interface InsightSynthesisOutput {
   narrative_summary?: string;
 }
 
+// ── Second-pass review (optional prior report validation) ──────────────────
+
+export interface SecondPassReviewIssue {
+  issue_id: string;
+  severity: "critical" | "low" | "medium" | "high";
+  category: "unsupported_claim" | "overreach" | "missing_uncertainty" | "internal_inconsistency" | "citation_gap" | "other";
+  finding: string;
+  prior_report_citation: string;
+  expected_evidence_citation: string | null;
+  recommendation: string;
+  llm_refinement_comment?: string | null;
+}
+
+export interface SecondPassReviewOutput {
+  outcome: "accept" | "reject" | "revise" | "needs_more_context";
+  summary: string;
+  issues: SecondPassReviewIssue[];
+  accepted_claims: string[];
+  revised_claims: string[];
+  dropped_claims: string[];
+  delta_summary?: string | null;
+  refinement_notes?: string | null;
+  follow_up_questions?: string[];
+  llm_refinement_applied?: boolean;
+}
+
 export interface FinalReport {
   provider: string;
   model: string;
   study_context: string | null;
   grounded_findings: GroundedFindingsSchema | null;
   synthesis_quality_score: SynthesisQualityScore | null;
+  second_pass_review?: SecondPassReviewOutput | null;
   treatment_columns_excluded: string[];
   final_insights: InsightSynthesisOutput;
   // run_id is derived from reproducibility_log if present
@@ -122,6 +149,7 @@ export interface PipelineState {
   studyContext: string;
   file: File | null;
   dictFile: File | null;
+  priorReportFile: File | null;
   outcomeColumn: string;
   provider: string;
   model: string;
@@ -138,6 +166,7 @@ export type PipelineAction =
   | { type: "SET_CONTEXT"; payload: string }
   | { type: "SET_FILE"; payload: File }
   | { type: "SET_DICT_FILE"; payload: File | null }
+  | { type: "SET_PRIOR_REPORT_FILE"; payload: File | null }
   | { type: "SET_OUTCOME_COLUMN"; payload: string }
   | { type: "SET_PROVIDER"; payload: { provider: string; model: string } }
   | { type: "START_UPLOAD" }

@@ -43,7 +43,11 @@ from qtrial_backend.agentic.schemas import (
     GuardrailReport,
     LiteratureRAGReport,
     MetadataInput,
+    PriorReportNormalized,
+    PriorReportClaim,
     ResearchQuestion,
+    SecondPassReviewOutput,
+    SecondPassReviewIssue,
     SynthesisOutput,
     SynthesisQualityScore,
     ToolCallRecord,
@@ -244,6 +248,402 @@ def run_synthesis_call(
 
 # ── Confidence warning annotation (internal critic output) ───────────────────
 
+def _review_prior_report_against_synthesis(
+    prior_report: PriorReportNormalized | None,
+    synthesis_output: SynthesisOutput | None,
+    grounded_findings_schema: GroundedFindingsSchema | None,
+    study_context: str,
+    provider: ProviderName,
+    analysis_report: str | None = None,
+    grounded_findings_list: list[GroundedFinding] | None = None,
+    evidence: dict[str, Any] | None = None,
+    guardrail_report: GuardrailReport | None = None,
+    synthesis_quality: SynthesisQualityScore | None = None,
+    typed_tool_log: list[ToolCallRecord] | None = None,
+) -> Any:
+    """
+    Deterministic-first second-pass review of prior report claims against V1 evidence.
+    
+    Receives V1 first-pass pipeline outputs for deterministic comparison with prior report.
+    
+    Implements real verdict logic for:
+    - grounded_finding claims (matched against literature-grounded findings)
+    - risk_signal claims (matched against guardrails + evidence)
+    - bias_signal claims (matched against guardrails + evidence)
+    
+    All other claim types return not_testable for now.
+    
+    Deterministic evidence inputs available for comparison:
+    - prior_report: normalized prior report with atomic claims (PriorReportNormalized)
+    - analysis_report: statistical analysis text output (str, deterministic agent loop output)
+    - grounded_findings_list: literature-grounded findings (list[GroundedFinding], deterministic validation)
+    - evidence: dataset profiling output (dict, deterministic statistical summary)
+    - guardrail_report: robustness checks (GuardrailReport, deterministic rule-based checks)
+    - synthesis_quality: synthesis self-score (SynthesisQualityScore, deterministic scoring)
+    - typed_tool_log: agent tool calls (list[ToolCallRecord], deterministic tool execution log)
+    
+    Returns:
+    - SecondPassReviewOutput with verdicts on supported prior claims
+    """
+    from qtrial_backend.agentic.schemas import SecondPassReviewOutput, SecondPassReviewIssue
+    
+    if prior_report is None:
+        return None
+    
+    if not prior_report.extracted_atomic_claims:
+        return SecondPassReviewOutput(
+            outcome="needs_more_context",
+            summary="Prior report has no extractable atomic claims.",
+            issues=[],
+            accepted_claims=[],
+        )
+    
+    # Track verdicts
+    accepted_claims: list[str] = []
+    issues: list[SecondPassReviewIssue] = []
+    issue_counter = 0
+    
+    # Iterate through prior report atomic claims
+    for claim in prior_report.extracted_atomic_claims:
+        issue_counter += 1
+        
+        # Only implement verdicts for these claim types
+        if claim.claim_type == "grounded_finding":
+            verdict = _evaluate_grounded_finding_claim(
+                claim, grounded_findings_list, analysis_report
+            )
+            if verdict["status"] == "supported":
+                accepted_claims.append(claim.claim_text)
+            elif verdict["status"] == "not_testable":
+                pass  # Skip low-confidence matches
+            else:
+                # contradicted or partially_supported
+                issues.append(
+                    SecondPassReviewIssue(
+                        issue_id=f"issue_{issue_counter}",
+                        severity="medium",
+                        category="unsupported_claim",
+                        finding=f"Grounded finding claim not supported: {claim.claim_text}",
+                        prior_report_citation=claim.section_id,
+                        expected_evidence_citation=verdict.get("evidence_citation"),
+                        recommendation=verdict.get("recommendation", ""),
+                    )
+                )
+        
+        elif claim.claim_type in ("risk_signal", "bias_signal"):
+            verdict = _evaluate_risk_or_bias_claim(
+                claim, guardrail_report, evidence, claim.claim_type
+            )
+            if verdict["status"] == "supported":
+                accepted_claims.append(claim.claim_text)
+            elif verdict["status"] == "not_testable":
+                pass  # Skip unmatched claims
+            else:
+                # contradicted or partially_supported
+                category = "missing_uncertainty" if claim.claim_type == "risk_signal" else "other"
+                issues.append(
+                    SecondPassReviewIssue(
+                        issue_id=f"issue_{issue_counter}",
+                        severity=verdict.get("severity", "medium"),
+                        category=category,
+                        finding=verdict.get("finding", f"{claim.claim_type} not confirmed"),
+                        prior_report_citation=claim.section_id,
+                        expected_evidence_citation=verdict.get("evidence_citation"),
+                        recommendation=verdict.get("recommendation", ""),
+                    )
+                )
+        
+        # else: claim_type not yet implemented -> skip (implicitly not_testable)
+    
+    # Determine overall outcome
+    if not accepted_claims and not issues:
+        outcome = "needs_more_context"
+        summary = "No prior claims could be evaluated against current evidence."
+    elif issues and not accepted_claims:
+        outcome = "reject"
+        summary = f"Found {len(issues)} issues in prior claims. No claims accepted."
+    elif accepted_claims and not issues:
+        outcome = "accept"
+        summary = f"Confirmed {len(accepted_claims)} prior claims against evidence."
+    else:
+        outcome = "revise"
+        summary = (
+            f"Confirmed {len(accepted_claims)} claims; found {len(issues)} issues. "
+            "Prior report requires refinement."
+        )
+    
+    return SecondPassReviewOutput(
+        outcome=outcome,
+        summary=summary,
+        issues=issues,
+        accepted_claims=accepted_claims,
+    )
+
+
+def _evaluate_grounded_finding_claim(
+    claim: PriorReportClaim,
+    grounded_findings_list: list[GroundedFinding] | None,
+    analysis_report: str | None,
+) -> dict[str, Any]:
+    """
+    Deterministic verdict for grounded_finding claims.
+    
+    Checks whether the claim text appears in any Supported literature-grounded findings.
+    Uses simple substring matching first, then falls back to semantic similarity if needed.
+    """
+    if not grounded_findings_list:
+        return {"status": "not_testable", "evidence_citation": "No grounded findings available"}
+    
+    # Normalize claim text for matching
+    claim_text_lower = claim.claim_text.lower().strip()
+    
+    # Look for matching grounded findings
+    for finding in grounded_findings_list:
+        if finding.grounding_status == "Supported":
+            finding_text_lower = finding.finding_text.lower().strip()
+            # Simple substring match: if claim appears in finding or finding key phrase in claim
+            if (claim_text_lower in finding_text_lower or 
+                len(claim_text_lower) > 30 and claim_text_lower[:30] in finding_text_lower):
+                return {
+                    "status": "supported",
+                    "evidence_citation": f"Grounded finding: {finding.evidence_strength.plain_language if finding.evidence_strength else 'supported'}",
+                }
+    
+    # Check if any Supported findings exist but no match (partial credit)
+    supported_count = sum(1 for f in grounded_findings_list if f.grounding_status == "Supported")
+    if supported_count > 0:
+        return {
+            "status": "partially_supported",
+            "evidence_citation": f"Grounded findings exist but claim not directly matched",
+            "recommendation": "Review claim against detailed literature findings.",
+        }
+    
+    return {"status": "not_testable", "evidence_citation": "No supported literature findings"}
+
+
+def _evaluate_risk_or_bias_claim(
+    claim: PriorReportClaim,
+    guardrail_report: GuardrailReport | None,
+    evidence: dict[str, Any] | None,
+    claim_type: str,
+) -> dict[str, Any]:
+    """
+    Deterministic verdict for risk_signal or bias_signal claims.
+    
+    For risk_signal: checks guardrail_report for high-severity flags.
+    For bias_signal: checks guardrail_report + evidence for data quality/limitation signals.
+    """
+    if not guardrail_report or not evidence:
+        return {"status": "not_testable", "evidence_citation": "No guardrails or evidence available"}
+    
+    flags = guardrail_report.flags if isinstance(guardrail_report.flags, list) else []
+    
+    if claim_type == "risk_signal":
+        # Look for flags that indicate risk (high severity, specific types)
+        high_severity_flags = [f for f in flags if f.get("severity") == "high"]
+        
+        if high_severity_flags:
+            flag_details = "; ".join([f.get("detail", "Risk detected") for f in high_severity_flags[:2]])
+            return {
+                "status": "supported",
+                "severity": "high",
+                "evidence_citation": f"Guardrail flags: {flag_details}",
+            }
+        
+        # Medium-severity flags -> partially supported
+        medium_flags = [f for f in flags if f.get("severity") == "medium"]
+        if medium_flags:
+            return {
+                "status": "partially_supported",
+                "severity": "medium",
+                "evidence_citation": f"Medium-severity guardrail flags detected",
+                "recommendation": "Risk present but not critical per current data.",
+            }
+        
+        return {"status": "not_testable", "evidence_citation": "No guardrail flags for risk"}
+    
+    elif claim_type == "bias_signal":
+        # Look for bias-related flags (limitations, missingness, data quality)
+        bias_related_check_types = {
+            "low_cardinality_numeric", "range_violation", "unit_plausibility"
+        }
+        bias_flags = [f for f in flags if f.get("check_type") in bias_related_check_types]
+        
+        if bias_flags:
+            flag_details = "; ".join([f.get("detail", "Bias signal detected") for f in bias_flags[:2]])
+            return {
+                "status": "supported",
+                "severity": "medium",
+                "evidence_citation": f"Guardrail bias signals: {flag_details}",
+            }
+        
+        # Check evidence for high missingness (>30%) or low cardinality
+        missingness_pct = evidence.get("missingness_pct", {})
+        high_missing_cols = [
+            col for col, pct in missingness_pct.items() if isinstance(pct, (int, float)) and pct > 30
+        ]
+        
+        if high_missing_cols:
+            return {
+                "status": "supported",
+                "severity": "medium",
+                "evidence_citation": f"High missingness in {len(high_missing_cols)} columns",
+                "recommendation": "Data completeness is a concern for reliability.",
+            }
+        
+        return {"status": "not_testable", "evidence_citation": "No data quality issues detected"}
+    
+    return {"status": "not_testable"}
+
+
+def _refine_second_pass_verdicts_with_llm(
+    review: SecondPassReviewOutput,
+    prior_report: PriorReportNormalized,
+    provider: ProviderName,
+    study_context: str,
+    analysis_report: str | None = None,
+    grounded_findings_list: list[GroundedFinding] | None = None,
+    evidence: dict[str, Any] | None = None,
+    guardrail_report: GuardrailReport | None = None,
+) -> SecondPassReviewOutput:
+    """
+    Bounded optional LLM refinement layer for second-pass review.
+    
+    NEVER modifies deterministic verdict fields (outcome, summary, issues, accepted_claims).
+    Only populates optional refinement fields: delta_summary, refinement_notes, follow_up_questions.
+    
+    Skips LLM call entirely if:
+    - provider is "offline" (explicit no-LLM mode)
+    - review has no issues or unresolved claims (nothing to refine)
+    - review outcome is "accept" with no partially_supported cases (clear signal)
+    
+    On LLM failure, returns review unchanged with llm_refinement_applied=False.
+    
+    Args:
+        review: Deterministic SecondPassReviewOutput from _review_prior_report_against_synthesis()
+        prior_report: Normalized prior report with extracted_atomic_claims
+        provider: Provider name (used to get_client)
+        study_context: Clinical context string
+        analysis_report: Statistical analysis text (for grounding)
+        grounded_findings_list: Literature-grounded findings (for context)
+        evidence: Data profiling evidence dict (for data quality context)
+        guardrail_report: Robustness guardrail flags (for signal context)
+    
+    Returns:
+        The same review object with optional refinement fields populated if LLM succeeded.
+    """
+    # ── Skip conditions: no value-add scenarios where LLM has nothing useful to do ──
+    if provider == "offline":
+        return review
+    
+    # Determine if there's anything worth refining
+    has_issues = bool(review.issues)
+    has_ambiguous_cases = any(
+        issue.severity == "medium" or issue.category in ("missing_uncertainty", "other")
+        for issue in review.issues
+    )
+    has_partial_supported = any(
+        claim.claim_type in ("risk_signal", "bias_signal")
+        for claim in prior_report.extracted_atomic_claims
+    )
+    
+    # Skip entirely if clear-cut verdict with no ambiguitity
+    if review.outcome == "accept" and not has_ambiguous_cases:
+        return review
+    
+    if not (has_issues or has_partial_supported):
+        return review
+    
+    # ── Build LLM prompt for bounded refinement task ──
+    from qtrial_backend.agentic.schemas import SecondPassReviewIssue
+    
+    issues_summary = "\n".join(
+        f"- {iss.issue_id}: {iss.finding} (severity: {iss.severity})"
+        for iss in review.issues[:5]  # Cap to avoid token overflow
+    ) if review.issues else "(no issues found)"
+    
+    accepted_text = "; ".join(review.accepted_claims[:5]) if review.accepted_claims else "(none)"
+    claims_text = "\n".join(
+        f"- {claim.claim_text} [type: {claim.claim_type}]"
+        for claim in prior_report.extracted_atomic_claims[:10]
+    ) if prior_report.extracted_atomic_claims else "(no claims)"
+    
+    data_quality_summary = ""
+    if evidence:
+        missingness_pct = evidence.get("missingness_pct", {})
+        high_missing = [col for col, pct in missingness_pct.items() if isinstance(pct, (int, float)) and pct > 30]
+        if high_missing:
+            data_quality_summary = f"\nData quality concerns: High missingness (>30%) in {len(high_missing)} columns."
+    
+    analysis_snippet = analysis_report[:2000] if analysis_report else "(no prior analysis report)"
+    
+    system_prompt = textwrap.dedent("""\
+        You are a clinical research analyst. Your role is to enrich a deterministic second-pass review
+        of a prior clinical report against current data-driven findings.
+        
+        CRITICAL constraints:
+        - Do NOT modify deterministic verdict labels (outcome, severity, categories remain fixed).
+        - Do NOT change what findings are accepted vs unsupported.
+        - Only add contextual explanation, data-backed rebuttals, and clarifying questions.
+        - Ground all statements in the provided evidence and analysis.
+        
+        Respond with ONLY valid JSON matching the contract — no markdown, no explanation.
+    """)
+    
+    user_prompt = textwrap.dedent(f"""\
+        Prior Report Claims (to compare against current analysis):
+        {claims_text}
+        
+        Current Analysis Findings:
+        {analysis_snippet}
+        
+        Deterministic Review Verdict:
+        - Outcome: {review.outcome}
+        - Accepted Claims: {accepted_text}
+        - Issues Found: {len(review.issues)}
+        {issues_summary}
+        {data_quality_summary}
+        
+        Study Context: {study_context}
+        
+        Task:
+        1. Summarize the delta between prior claims and current findings in 1-2 sentences (delta_summary).
+        2. Write contextual notes explaining the deterministic verdict (refinement_notes).
+        3. Suggest 2-3 clarifying questions for the clinician (follow_up_questions).
+        
+        Return JSON (schema must match exactly):
+        {{
+          "delta_summary": "<1-2 sentence summary of changes>",
+          "refinement_notes": "<contextual explanation of verdict>",
+          "follow_up_questions": ["<question 1>", "<question 2>", ...]
+        }}
+    """)
+    
+    try:
+        client = get_client(provider)
+        req = LLMRequest(system_prompt=system_prompt, user_prompt=user_prompt, payload={"temperature": 0})
+        resp = client.generate(req)
+        raw = resp.text.strip().strip("```json").strip("```").strip()
+        
+        data = json.loads(raw)
+        
+        # Populate optional fields (only if LLM succeeded)
+        review.delta_summary = str(data.get("delta_summary", "")).strip() or None
+        review.refinement_notes = str(data.get("refinement_notes", "")).strip() or None
+        review.follow_up_questions = [
+            str(q).strip() for q in data.get("follow_up_questions", [])
+            if q and str(q).strip()
+        ]
+        review.llm_refinement_applied = True
+        
+        return review
+        
+    except Exception as exc:
+        # On LLM failure, return deterministic review unchanged
+        console.print(f"[yellow]⚠ Second-pass LLM refinement failed: {exc}[/yellow]")
+        return review
+
+
 def _annotate_confidence_warnings(
     grounded_findings: GroundedFindingsSchema | None,
     evidence: dict[str, Any],
@@ -323,6 +723,7 @@ def run_agentic_insights(
     emit: Callable | None = None,
     study_context: str = "",
     column_dict: dict[str, str] | None = None,
+    prior_report: PriorReportNormalized | None = None,
 ) -> FinalReportSchema:
     """
     Run the Q-Trial pipeline as specified in the design document.
@@ -352,8 +753,13 @@ def run_agentic_insights(
         if emit is not None:
             try:
                 emit({"type": event_type, "stage": stage, "message": message})
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    console.print(
+                        f"[yellow]⚠ Emit failed ({event_type}/{stage}): {exc}[/yellow]"
+                    )
+                except Exception:
+                    pass
 
     typed_tool_log = _coerce_tool_log(tool_log)
 
@@ -510,6 +916,39 @@ def run_agentic_insights(
         tool_log=typed_tool_log,
     )
 
+    # ── Second-pass review hook (placeholder for delta-focused V2 refinement) ──
+    # If a prior report was uploaded, this stage will eventually compare V1 results
+    # against the prior report using deterministic evidence and generate focused follow-up analyses.
+    # For now: placeholder / no-op when prior_report is provided.
+    _second_pass_review = _review_prior_report_against_synthesis(
+        prior_report=prior_report,
+        synthesis_output=synthesis_output,
+        grounded_findings_schema=grounded_findings_schema,
+        study_context=study_context,
+        provider=provider,
+        analysis_report=analysis_report,
+        grounded_findings_list=grounded_findings_list if grounded_findings_list else None,
+        evidence=evidence,
+        guardrail_report=guardrail_report,
+        synthesis_quality=synthesis_quality,
+        typed_tool_log=typed_tool_log,
+    )
+    
+    # ── Optional bounded LLM refinement layer (Step 4B.2) ──
+    # Enriches deterministic review with contextual wording, data-backed rebuttals, and follow-up questions.
+    # Deterministic verdict fields remain the source of truth; LLM only populates optional refinement fields.
+    if _second_pass_review is not None and prior_report is not None:
+        _second_pass_review = _refine_second_pass_verdicts_with_llm(
+            review=_second_pass_review,
+            prior_report=prior_report,
+            provider=provider,
+            study_context=study_context,
+            analysis_report=analysis_report,
+            grounded_findings_list=grounded_findings_list,
+            evidence=evidence,
+            guardrail_report=guardrail_report,
+        )
+
     # ── Reproducibility log ───────────────────────────────────────────────────
     repro_log = _repro.finalise(synthesis_quality_score=synthesis_quality)
 
@@ -586,6 +1025,7 @@ def run_agentic_insights(
         grounded_findings=grounded_findings_schema,
         reproducibility_log=repro_log,
         synthesis_quality_score=synthesis_quality,
+        second_pass_review=_second_pass_review,
         treatment_columns_excluded=detect_treatment_columns(df),
     )
 

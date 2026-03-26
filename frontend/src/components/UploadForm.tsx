@@ -32,13 +32,14 @@ const BEDROCK_MODELS = [
 
 interface Props {
   studyContext: string;
-  onDetect: (file: File, dictFile: File | null, outcomeColumn: string, provider: string, model: string) => void;
+  onDetect: (file: File, dictFile: File | null, priorReportFile: File | null, outcomeColumn: string, provider: string, model: string) => void;
 }
 
 export function UploadForm({ studyContext, onDetect }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dictFile, setDictFile] = useState<File | null>(null);
+  const [priorReportFile, setPriorReportFile] = useState<File | null>(null);
   const [outcomeColumn, setOutcomeColumn] = useState("");
   const [provider, setProvider] = useState("gemini");
   const [orModel, setOrModel] = useState(OPENROUTER_MODELS[0].id);
@@ -53,7 +54,7 @@ export function UploadForm({ studyContext, onDetect }: Props) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (file) onDetect(file, dictFile, outcomeColumn, provider, resolvedModel());
+    if (file) onDetect(file, dictFile, priorReportFile, outcomeColumn, provider, resolvedModel());
   }
 
   const needsCustom = (provider === "openrouter" && orModel === "custom") ||
@@ -119,6 +120,27 @@ export function UploadForm({ studyContext, onDetect }: Props) {
             Helps the agent interpret columns accurately.
             {dictFile && (
               <span style={{ color: "#16a34a", marginLeft: "0.5rem" }}>✓ {dictFile.name}</span>
+            )}
+          </p>
+        </div>
+
+        {/* Prior report */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <label htmlFor="prior-report-file" style={{ fontWeight: 600, display: "block", marginBottom: "0.4rem" }}>
+            Prior report <span style={{ fontWeight: 400, color: "#6b7280" }}>(optional)</span>
+          </label>
+          <input
+            id="prior-report-file"
+            type="file"
+            accept=".md,.markdown,.txt,.json"
+            onChange={(e) => setPriorReportFile(e.target.files?.[0] ?? null)}
+            style={{ fontSize: "0.95rem" }}
+          />
+          <p style={{ fontSize: "0.8rem", color: "#9ca3af", margin: "0.3rem 0 0" }}>
+            Prior or external clinical report (markdown, text, or JSON).
+            Will be compared against current findings for validation.
+            {priorReportFile && (
+              <span style={{ color: "#16a34a", marginLeft: "0.5rem" }}>✓ {priorReportFile.name}</span>
             )}
           </p>
         </div>

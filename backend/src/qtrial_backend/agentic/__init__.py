@@ -28,6 +28,16 @@ from qtrial_backend.agentic.schemas import (
     HiddenQuestion,
     LLMHypothesis,
     HypothesisGenerationOutput,
+    PriorReportSection,
+    PriorReportNormalized,
+    SecondPassReviewIssue,
+    SecondPassReviewOutput,
+    ReviewSeverity,
+    ReviewOutcome,
+)
+from qtrial_backend.agentic.prior_report_parser import (
+    parse_prior_report_file,
+    normalize_prior_report_text,
 )
 from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.orchestrator import run_agentic_insights
@@ -94,6 +104,15 @@ __all__ = [
     "HiddenQuestion",
     "LLMHypothesis",
     "HypothesisGenerationOutput",
+    # second-pass review + prior report normalization
+    "PriorReportSection",
+    "PriorReportNormalized",
+    "SecondPassReviewIssue",
+    "SecondPassReviewOutput",
+    "ReviewSeverity",
+    "ReviewOutcome",
+    "parse_prior_report_file",
+    "normalize_prior_report_text",
     "generate_dynamic_hypotheses",
     "integrate_dynamic_hypotheses",
     # pipeline runners

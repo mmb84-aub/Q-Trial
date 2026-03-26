@@ -17,6 +17,7 @@ const STAGE_INFO: Record<string, { label: string; detail: string }> = {
 interface Props {
   file: File;
   dictFile?: File | null;
+  priorReportFile?: File | null;
   studyContext: string;
   confirmedTreatmentColumns: string[];
   provider?: string;
@@ -25,7 +26,7 @@ interface Props {
   dispatch: React.Dispatch<PipelineAction>;
 }
 
-export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmentColumns, provider = "gemini", model = "", progressMessages, dispatch }: Props) {
+export function ProgressStream({ file, dictFile, priorReportFile, studyContext, confirmedTreatmentColumns, provider = "gemini", model = "", progressMessages, dispatch }: Props) {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
@@ -37,6 +38,7 @@ export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmen
       formData.append("provider", provider);
       if (model) formData.append("model", model);
       if (dictFile) formData.append("dict_file", dictFile);
+      if (priorReportFile) formData.append("prior_report_file", priorReportFile);
       confirmedTreatmentColumns.forEach((col) => formData.append("confirmed_treatment_columns", col));
 
       let response: Response;

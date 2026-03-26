@@ -12,9 +12,10 @@ import { ToastStack } from "./components/ToastStack";
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  async function handleDetect(file: File, dictFile: File | null, outcomeColumn: string, provider: string, model: string) {
+  async function handleDetect(file: File, dictFile: File | null, priorReportFile: File | null, outcomeColumn: string, provider: string, model: string) {
     dispatch({ type: "SET_FILE", payload: file });
     dispatch({ type: "SET_DICT_FILE", payload: dictFile });
+    dispatch({ type: "SET_PRIOR_REPORT_FILE", payload: priorReportFile });
     dispatch({ type: "SET_OUTCOME_COLUMN", payload: outcomeColumn });
     dispatch({ type: "SET_PROVIDER", payload: { provider, model } });
     dispatch({ type: "START_UPLOAD" });
@@ -78,6 +79,7 @@ export default function App() {
               key={state.retryCount}
               file={state.file}
               dictFile={state.dictFile}
+              priorReportFile={state.priorReportFile}
               studyContext={state.studyContext}
               confirmedTreatmentColumns={state.confirmedTreatmentColumns}
               provider={state.provider}

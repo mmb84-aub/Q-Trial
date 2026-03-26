@@ -1,5 +1,6 @@
 import type { FinalReport } from "../../types";
 import { CoverPage } from "./CoverPage";
+import { SecondPassReviewSection } from "./SecondPassReviewSection";
 import { NarrativeSummary } from "./NarrativeSummary";
 import { FindingsList } from "./FindingsList";
 import { ExcludedColumnsSection } from "./ExcludedColumnsSection";
@@ -62,6 +63,9 @@ export function InteractiveReport({ report, onReset }: Props) {
       )}
 
       <CoverPage report={report} generatedAt={generatedAt} />
+
+      {/* Optional second-pass review of prior report */}
+      {report.second_pass_review && <SecondPassReviewSection review={report.second_pass_review} />}
 
       {/* Section order per design: narrative → findings → forward recs → research questions → excluded columns */}
       <NarrativeSummary report={report} />

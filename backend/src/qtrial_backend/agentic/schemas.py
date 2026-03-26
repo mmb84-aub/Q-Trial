@@ -259,6 +259,160 @@ class MetadataInput(BaseModel):
     )
 
 
+# ── Second-pass review (uploaded prior report) ──────────────────────────────
+
+ReviewSeverity = Literal["critical", "high", "medium", "low"]
+ReviewOutcome = Literal["accept", "revise", "reject", "needs_more_context"]
+
+
+class PriorReportSection(BaseModel):
+    """Normalized section extracted from an uploaded prior report."""
+
+    section_id: str = Field(
+        ..., description="Stable local id, e.g. 'sec_1'."
+    )
+    title: str = ""
+    content: str = ""
+    source_span: str | None = Field(
+        default=None,
+        description="Optional source hint such as line range or page marker.",
+    )
+
+
+class PriorReportClaim(BaseModel):
+    """Atomic structured claim extracted from a prior report section."""
+
+    claim_id: str = Field(..., description="Stable local id, e.g. 'claim_1'.")
+    section_id: str = Field(..., description="Which section this claim came from, e.g. 'sec_2'.")
+    section_title: str = "" # The title of the section for context
+    claim_text: str = Field(..., description="The normalized claim statement.")
+    claim_type: Literal[
+        "key_finding",
+        "risk_signal",
+        "bias_signal",
+        "grounded_finding",
+        "recommendation",
+        "assumption",
+        "methodology",
+        "limitation",
+        "unknown",
+    ] = "unknown"
+    source_excerpt: str = Field(
+        default="",
+        description="The original excerpt from the report this claim was extracted from.",
+    )
+    parser_confidence: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in the extraction and typing (0.0-1.0).",
+    )
+
+
+class PriorReportNormalized(BaseModel):
+    """Canonical representation of an uploaded prior report."""
+
+    source_name: str = ""
+    source_format: Literal["json", "markdown", "text", "unknown"] = "unknown"
+    raw_text: str = ""
+    sections: list[PriorReportSection] = Field(default_factory=list)
+    extracted_claims: list[str] = Field(
+        default_factory=list,
+        description="Optional initial claim strings detected in normalization (legacy/flat format).",
+    )
+    extracted_atomic_claims: list[PriorReportClaim] = Field(
+        default_factory=list,
+        description="Structured atomic claims extracted via deterministic parsing.",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SecondPassReviewIssue(BaseModel):
+    """One issue found while reviewing a prior report against current evidence."""
+
+    issue_id: str = Field(..., description="Stable id, e.g. 'issue_1'.")
+    severity: ReviewSeverity
+    category: Literal[
+        "unsupported_claim",
+        "overreach",
+        "missing_uncertainty",
+        "internal_inconsistency",
+        "citation_gap",
+        "other",
+    ]
+    finding: str
+    prior_report_citation: str = Field(
+        ..., description="Section reference in normalized prior report, e.g. sec_2."
+    )
+    expected_evidence_citation: str | None = Field(
+        default=None,
+        description="Resolvable evidence key expected to support the claim.",
+    )
+    recommendation: str = ""
+    
+    # ── Optional fields for future bounded LLM refinement (Step 4B.2+) ──
+    llm_refinement_comment: str | None = Field(
+        default=None,
+        description=(
+            "Optional LLM-generated comment contextualizing this deterministic issue. "
+            "Added by future bounded refinement layer; does not change verdict or recommendation."
+        ),
+    )
+
+
+class SecondPassReviewOutput(BaseModel):
+    """
+    Structured output for the second-pass review stage.
+    
+    Deterministic review verdict fields (outcome, summary, issues, accepted/revised/dropped_claims)
+    are the source of truth and remain unchanged by any future LLM refinement layer.
+    
+    Optional refinement fields (delta_summary, refinement_notes, follow_up_questions, llm_refinement_applied)
+    are additive and populated only if bounded LLM refinement is applied (future Step 4B.2+).
+    """
+
+    # ── Deterministic verdict fields (source of truth; never modified by LLM)
+    outcome: ReviewOutcome = "needs_more_context"
+    summary: str = ""
+    issues: list[SecondPassReviewIssue] = Field(default_factory=list)
+    accepted_claims: list[str] = Field(default_factory=list)
+    revised_claims: list[str] = Field(default_factory=list)
+    dropped_claims: list[str] = Field(default_factory=list)
+    
+    # ── Optional fields for future bounded LLM refinement (Step 4B.2+) ──
+    delta_summary: str | None = Field(
+        default=None,
+        description=(
+            "Optional LLM-generated focused summary of changes from prior report to current analysis. "
+            "Example: 'Confirmed 3 key findings; found 2 disputed claims; unprecedented 1 novel signal.' "
+            "Only populated if bounded LLM refinement is applied."
+        ),
+    )
+    refinement_notes: str | None = Field(
+        default=None,
+        description=(
+            "Optional LLM-generated contextual notes on the deterministic verdict. "
+            "May include clinical framing, data-backed rebuttals, or uncertainty hedging. "
+            "Does not change verdict labels; enriches explanation only."
+        ),
+    )
+    follow_up_questions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional LLM-generated clarifying questions for clinician follow-up. "
+            "Examples: 'Was [treatment] adjusted during follow-up?', 'Can you confirm [outcome] coding?'. "
+            "Only populated if bounded LLM refinement is applied."
+        ),
+    )
+    llm_refinement_applied: bool = Field(
+        default=False,
+        description=(
+            "Flag indicating whether bounded LLM refinement has been applied to this review. "
+            "True only if delta_summary, refinement_notes, or follow_up_questions are populated."
+        ),
+    )
+
+
 # ── Upstream tool-call record (from AgentLoop / static pipeline) ──────────────
 
 class ToolCallRecord(BaseModel):
@@ -727,6 +881,13 @@ class FinalReportSchema(BaseModel):
     synthesis_quality_score: SynthesisQualityScore | None = Field(
         default=None,
         description="Self-assessment score from the synthesis LLM call.",
+    )
+    second_pass_review: SecondPassReviewOutput | None = Field(
+        default=None,
+        description=(
+            "Optional second-pass review output comparing prior/external report against V1 synthesis. "
+            "None when no prior report is uploaded. Includes deterministic verdicts + optional LLM refinement."
+        ),
     )
     treatment_columns_excluded: list[str] = Field(
         default_factory=list,
