@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Dev / test dependencies
+pytest>=8.0.0
+hypothesis[pandas]>=6.100.0
