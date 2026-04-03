@@ -817,6 +817,7 @@ class GroundedFindingsSchema(BaseModel):
     synthesis: SynthesisOutput | None = None
     excluded_columns: list[ExcludedColumn] = Field(default_factory=list)
     high_missingness_columns: list[HighMissingnessColumn] = Field(default_factory=list)
+    quantum_evidence: dict | None = None  # QUBO feature selection results
 
 
 # ── New schemas: Synthesis Quality, Reproducibility Log ──────────────────────

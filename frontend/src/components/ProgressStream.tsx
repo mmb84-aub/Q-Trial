@@ -6,6 +6,7 @@ import type { FinalReport, PipelineAction } from "../types";
 // Keys must match exactly what the backend emits in {"type":"stage_complete","stage":"<key>"}.
 const STAGE_INFO: Record<string, { label: string; detail: string }> = {
   StaticAnalysis:       { label: "Deterministic profiling",    detail: "Running data quality checks, missingness analysis, and outlier detection — no AI involved." },
+  feature_selection:    { label: "Quantum feature selection",  detail: "Using QUBO-based optimization to select most relevant variables and reduce redundancy." },
   StatisticalLoop:      { label: "Statistical analysis",       detail: "AI agent iteratively selects and runs statistical tests suited to your data." },
   dataset:              { label: "Evidence & guardrails",      detail: "Building the evidence profile and running robustness checks on the dataset." },
   cst_translation:      { label: "Clinical search terms",      detail: "Translating statistical findings into clinical search phrases for literature queries." },

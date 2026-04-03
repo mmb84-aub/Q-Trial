@@ -6,6 +6,10 @@ import { ExcludedColumnsSection } from "./ExcludedColumnsSection";
 import { QuestionBank } from "./QuestionBank";
 import { ForwardRecommendations } from "./ForwardRecommendations";
 import { PDFExportButton, ReproducibilityLogDownload, ADLViewerButton } from "./ReportActions";
+import { SelectionMetadata } from "./SelectionMetadata";
+import { FeatureRelevanceChart } from "./FeatureRelevanceChart";
+import { RedundancyMetricsCard } from "./RedundancyMetricsCard";
+import { FeatureSelectionToggle } from "./FeatureSelectionToggle";
 
 interface Props {
   report: FinalReport;
@@ -62,6 +66,16 @@ export function InteractiveReport({ report, onReset }: Props) {
       )}
 
       <CoverPage report={report} generatedAt={generatedAt} />
+
+      {/* Quantum-Enhanced Feature Selection Section (8.1–8.8 validations) */}
+      {gf?.quantum_evidence && (
+        <>
+          <SelectionMetadata quantum={gf.quantum_evidence} />
+          <FeatureRelevanceChart quantum={gf.quantum_evidence} />
+          <RedundancyMetricsCard quantum={gf.quantum_evidence} />
+          <FeatureSelectionToggle quantum={gf.quantum_evidence} />
+        </>
+      )}
 
       {/* Section order per design: narrative → findings → forward recs → research questions → excluded columns */}
       <NarrativeSummary report={report} />

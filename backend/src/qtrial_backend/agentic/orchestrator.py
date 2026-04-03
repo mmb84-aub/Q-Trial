@@ -494,6 +494,7 @@ def run_agentic_insights(
                 findings=grounded_findings_list,
                 research_questions=synthesis_output.research_questions,
                 synthesis=synthesis_output,
+                quantum_evidence=quantum_evidence,
             )
 
         except Exception as exc:
