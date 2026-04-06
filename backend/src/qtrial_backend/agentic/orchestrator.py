@@ -57,6 +57,7 @@ from qtrial_backend.agentic.synthesis_scorer import (
     SYNTHESIS_QUALITY_THRESHOLD,
     score_synthesis_quality,
 )
+from qtrial_backend.agentic.validation import build_retry_prompt, validate_synthesis_output
 from qtrial_backend.core.router import get_client
 from qtrial_backend.core.types import LLMRequest, ProviderName
 from qtrial_backend.dataset.evidence import build_dataset_evidence, format_citations
@@ -243,6 +244,63 @@ def run_synthesis_call(
         research_questions=research_questions,
         narrative_summary=narrative,
     )
+
+    # ── Deterministic validation + single retry ───────────────────────────
+    errors = validate_synthesis_output(synthesis, grounded_findings)
+    if errors:
+        retry_prompt = build_retry_prompt(errors, user)
+        retry_req = LLMRequest(
+            system_prompt=_SYNTHESIS_SYSTEM,
+            user_prompt=retry_prompt,
+            payload={"temperature": 0},
+        )
+        try:
+            retry_resp = client.generate(retry_req)
+            retry_raw = retry_resp.text.strip().strip("```json").strip("```").strip()
+            retry_data = json.loads(retry_raw)
+
+            retry_variables = [
+                ControlVariable(variable=v.get("variable", ""), reason=v.get("reason", ""))
+                for v in retry_data.get("variables_to_control", [])
+                if isinstance(v, dict)
+            ]
+            retry_questions = [
+                ResearchQuestion(question=q.get("question", ""), source_finding=q.get("source_finding", ""))
+                for q in retry_data.get("research_questions", [])
+                if isinstance(q, dict)
+            ]
+            retry_narrative = str(retry_data.get("narrative_summary", ""))
+
+            synthesis = SynthesisOutput(
+                future_trial_hypothesis=str(retry_data.get("future_trial_hypothesis", "")),
+                endpoint_improvement_recommendations=[
+                    str(r) for r in retry_data.get("endpoint_improvement_recommendations", [])
+                ],
+                recommended_sample_size=str(retry_data.get("recommended_sample_size", "")),
+                variables_to_control=retry_variables,
+                research_questions=retry_questions,
+                narrative_summary=retry_narrative,
+            )
+            narrative = retry_narrative
+
+            retry_errors = validate_synthesis_output(synthesis, grounded_findings)
+            if retry_errors:
+                synthesis = synthesis.model_copy(
+                    update={
+                        "narrative_summary": synthesis.narrative_summary
+                        + "\n\n[VALIDATION WARNINGS]: "
+                        + str(retry_errors)
+                    }
+                )
+        except Exception:
+            synthesis = synthesis.model_copy(
+                update={
+                    "narrative_summary": synthesis.narrative_summary
+                    + "\n\n[VALIDATION WARNINGS]: "
+                    + str(errors)
+                }
+            )
+
     return synthesis, narrative
 
 
