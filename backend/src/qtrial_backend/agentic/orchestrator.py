@@ -53,10 +53,6 @@ from qtrial_backend.agentic.schemas import (
     ToolCallRecord,
     UnknownsOutput,
 )
-from qtrial_backend.agentic.synthesis_scorer import (
-    SYNTHESIS_QUALITY_THRESHOLD,
-    score_synthesis_quality,
-)
 from qtrial_backend.agentic.validation import build_retry_prompt, validate_synthesis_output
 from qtrial_backend.core.router import get_client
 from qtrial_backend.core.types import LLMRequest, ProviderName
@@ -533,24 +529,7 @@ def run_agentic_insights(
             )
             _emit("stage_complete", "synthesis", "Synthesis complete")
             console.print("  [green]✓ Synthesis complete[/green]")
-
-            # Self-scoring
-            synthesis_quality = score_synthesis_quality(synthesis_output, study_context, provider)
-            if synthesis_quality.score < SYNTHESIS_QUALITY_THRESHOLD:
-                console.print(
-                    f"  [yellow]⚠ Quality score {synthesis_quality.score:.2f} < "
-                    f"threshold {SYNTHESIS_QUALITY_THRESHOLD:.2f} — re-running synthesis…[/yellow]"
-                )
-                synthesis_output, narrative_summary = run_synthesis_call(
-                    analysis_report=analysis_report,
-                    grounded_findings=grounded_findings_list,
-                    study_context=study_context,
-                    provider=provider,
-                )
-                synthesis_quality.rerun_triggered = True
-                synthesis_quality = score_synthesis_quality(synthesis_output, study_context, provider)
-                synthesis_quality.rerun_triggered = True
-            _emit("stage_complete", "synthesis_scoring", f"Quality: {synthesis_quality.score:.2f}")
+            _emit("stage_complete", "synthesis_scoring", "Deterministic validation applied")
 
             grounded_findings_schema = GroundedFindingsSchema(
                 findings=grounded_findings_list,

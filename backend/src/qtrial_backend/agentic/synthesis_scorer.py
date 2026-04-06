@@ -1,3 +1,5 @@
+# NOTE: This module is no longer called by the pipeline.
+# Retained for reference. Do not invoke from orchestrator.py.
 """
 Synthesis Quality Scorer.
 
