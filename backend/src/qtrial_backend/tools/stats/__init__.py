@@ -22,3 +22,17 @@ from qtrial_backend.tools.stats.regression import regression as regression
 from qtrial_backend.tools.stats.multiple_testing import multiple_testing_correction as multiple_testing_correction
 from qtrial_backend.tools.stats.plot_spec import plot_spec as plot_spec
 from qtrial_backend.tools.stats.stat_test_selector import stat_test_selector as stat_test_selector
+
+# ── Three-stage clinical trial framework ──────────────────────────────────────
+from qtrial_backend.tools.stats.digit_preference import digit_preference_test as digit_preference_test
+from qtrial_backend.tools.stats.mice_imputation import mice_imputation as mice_imputation
+from qtrial_backend.tools.stats.mice_imputation import get_imputed_dataframe as get_imputed_dataframe
+from qtrial_backend.tools.stats.mmrm import mixed_model_repeated_measures as mixed_model_repeated_measures
+from qtrial_backend.tools.stats.power_analysis import power_analysis as power_analysis
+from qtrial_backend.tools.stats.power_analysis import batch_power_analysis as batch_power_analysis
+from qtrial_backend.tools.stats.ancova import ancova as ancova
+from qtrial_backend.tools.stats.subgroup_analysis import subgroup_analysis as subgroup_analysis
+from qtrial_backend.tools.stats.clinical_stats import run_clinical_analysis as run_clinical_analysis
+from qtrial_backend.tools.stats.missing import little_mcar_test as little_mcar_test
+from qtrial_backend.tools.stats.multiple_testing import classify_endpoints as classify_endpoints
+from qtrial_backend.tools.stats.multiple_testing import hierarchical_testing as hierarchical_testing

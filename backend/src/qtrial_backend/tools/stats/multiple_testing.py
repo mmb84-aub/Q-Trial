@@ -118,3 +118,111 @@ def multiple_testing_correction(params: MultipleTestingParams, ctx: AgentContext
         "n_significant_after_correction": n_significant,
         "results": results,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoint classification + hierarchical gatekeeping  (standalone functions)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def classify_endpoints(findings: list[dict], primary_ids: list[str]) -> list[dict]:
+    """Tag each finding with 'primary' or 'secondary' endpoint type.
+
+    Parameters
+    ----------
+    findings:
+        List of finding dicts, each containing at least ``{"id": str, "p_value": float}``.
+    primary_ids:
+        List of finding IDs that correspond to primary endpoints.
+
+    Returns
+    -------
+    The same list with an added ``"endpoint_type"`` key on each dict
+    (``"primary"`` if ``finding["id"]`` is in *primary_ids*, else ``"secondary"``).
+    """
+    primary_set = set(primary_ids)
+    out = []
+    for finding in findings:
+        tagged = dict(finding)
+        tagged["endpoint_type"] = "primary" if finding.get("id") in primary_set else "secondary"
+        out.append(tagged)
+    return out
+
+
+def hierarchical_testing(findings: list[dict]) -> dict:
+    """Enforce hierarchical (gatekeeping) testing for primary → secondary endpoints.
+
+    Parameters
+    ----------
+    findings:
+        List of finding dicts already tagged by :func:`classify_endpoints`.  Each
+        dict must contain:
+        ``{"id", "p_value", "endpoint_type", "adjusted_p_value"}``.
+
+    Logic
+    -----
+    1. If **any** primary endpoint has ``adjusted_p_value < 0.05`` → gate is OPEN.
+    2. If NO primary endpoint reaches significance → all secondary results are
+       marked ``gated_out = True`` (closed hierarchy).
+    3. When the gate is open, BH-FDR is re-applied to secondary endpoints only.
+
+    Returns
+    -------
+    dict with keys:
+    ``primary_significant``, ``gate_open``, ``findings`` (extended), ``interpretation``.
+    """
+    primary = [f for f in findings if f.get("endpoint_type") == "primary"]
+    secondary = [f for f in findings if f.get("endpoint_type") == "secondary"]
+
+    primary_significant = any(
+        float(f.get("adjusted_p_value", 1.0)) < 0.05 for f in primary
+    )
+    gate_open = primary_significant
+
+    extended: list[dict] = []
+
+    # Primary findings — gate does not apply to them; just propagate
+    for f in primary:
+        out = dict(f)
+        out["gated_out"] = False
+        out["hierarchical_adjusted_p"] = f.get("adjusted_p_value")
+        out["reason"] = None
+        extended.append(out)
+
+    if not gate_open:
+        # Close the gate: mark all secondary as gated_out
+        for f in secondary:
+            out = dict(f)
+            out["gated_out"] = True
+            out["hierarchical_adjusted_p"] = None
+            out["reason"] = (
+                "Primary endpoint did not reach significance — hierarchical gate closed"
+            )
+            extended.append(out)
+        interpretation = (
+            "No primary endpoint reached significance after correction. "
+            "All secondary endpoint results are gated out and should not be "
+            "interpreted as confirmatory."
+        )
+    else:
+        # Re-apply BH-FDR to secondary endpoints
+        if secondary:
+            sec_p = np.array([float(f.get("p_value", 1.0)) for f in secondary])
+            sec_adj = _bh_correction(sec_p, alpha=0.05)
+            for f, adj_p in zip(secondary, sec_adj.tolist()):
+                out = dict(f)
+                out["gated_out"] = False
+                out["hierarchical_adjusted_p"] = round(float(adj_p), 6)
+                out["reason"] = None
+                extended.append(out)
+        interpretation = (
+            "Primary endpoint is significant — hierarchical gate is open. "
+            "Secondary endpoints are evaluated using BH-FDR correction."
+        )
+
+    return {
+        "primary_significant": primary_significant,
+        "gate_open": gate_open,
+        "findings": extended,
+        "interpretation": interpretation,
+    }
