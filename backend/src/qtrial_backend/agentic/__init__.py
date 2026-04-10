@@ -29,7 +29,6 @@ from qtrial_backend.agentic.schemas import (
     LLMHypothesis,
     HypothesisGenerationOutput,
 )
-from qtrial_backend.agentic.judge import run_judge_agent
 from qtrial_backend.agentic.orchestrator import run_agentic_insights
 from qtrial_backend.agentic.reasoning import (
     build_valid_citation_keys,
@@ -97,6 +96,5 @@ __all__ = [
     "generate_dynamic_hypotheses",
     "integrate_dynamic_hypotheses",
     # pipeline runners
-    "run_judge_agent",
     "run_agentic_insights",
 ]

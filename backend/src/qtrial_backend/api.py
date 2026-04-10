@@ -128,8 +128,9 @@ async def run_analysis(
     if excluded_cols:
         df = df.drop(columns=excluded_cols)
 
+    clinical_analysis_result: dict | None = None
     try:
-        static_report = await asyncio.to_thread(build_static_report, df, dataset_name)
+        static_report, clinical_analysis_result = await asyncio.to_thread(build_static_report, df, dataset_name)
     except Exception:
         static_report = None
 
@@ -163,6 +164,7 @@ async def run_analysis(
             study_context,
             column_dict,
             list(missingness_disclosures.values()),
+            clinical_analysis_result,
         )
     except Exception as exc:
         raise HTTPException(
@@ -245,8 +247,9 @@ async def run_analysis_stream(
         set_bedrock_model(model if provider == "bedrock" else None)
         try:
             # ── 1. Deterministic static report ───────────────────────────────
+            clinical_analysis_result: dict | None = None
             try:
-                static_report = build_static_report(df, dataset_name, emit=emit)
+                static_report, clinical_analysis_result = build_static_report(df, dataset_name, emit=emit)
             except Exception:
                 static_report = None
 
@@ -289,6 +292,7 @@ async def run_analysis_stream(
                 analysis_report, tool_log, emit,
                 study_context, column_dict,
                 list(missingness_disclosures.values()),
+                clinical_analysis_result,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

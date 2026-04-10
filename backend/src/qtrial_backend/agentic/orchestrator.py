@@ -382,6 +382,7 @@ def run_agentic_insights(
     study_context: str = "",
     column_dict: dict[str, str] | None = None,
     missingness_disclosures: list[MissingnessDisclosure] | None = None,
+    clinical_analysis: dict | None = None,
 ) -> FinalReportSchema:
     """
     Run the Q-Trial pipeline as specified in the design document.
@@ -652,6 +653,7 @@ def run_agentic_insights(
         reproducibility_log=repro_log,
         synthesis_quality_score=synthesis_quality,
         treatment_columns_excluded=detect_treatment_columns(df),
+        clinical_analysis=clinical_analysis,
     )
 
     report_dict = report.model_dump()

@@ -295,6 +295,73 @@ _ADL_ENTRIES: list[dict] = [
             "CONSORT 2010 §4 — Trial design",
         ],
     },
+    {
+        "id": "ADL-009",
+        "title": "Three-Stage Clinical Trial Statistical Framework (Task 2)",
+        "status": "Accepted",
+        "context": (
+            "Generic descriptive statistics (means, correlations, t-tests) are "
+            "insufficient for clinical trial datasets because they do not control "
+            "multiplicity, do not account for within-subject correlation in "
+            "longitudinal designs, and do not correct for non-random missing data. "
+            "FDA (Statistical Principles for Clinical Trials, 1998; ICH E9) and EMA "
+            "(ICH E9 R1 Addendum, 2019) require that these issues be addressed "
+            "explicitly.  ADL-003 describes the column-level exclusion policy for "
+            "columns with >50%/20-50%/<20% missingness; the present entry documents "
+            "the complementary statistical analysis framework that runs alongside it."
+        ),
+        "decision": (
+            "Implement run_clinical_analysis() — a deterministic three-stage clinical "
+            "trial statistical framework in tools/stats/clinical_stats.py: "
+            "Stage 1 (Integrity): digit preference test (chi-square on last-digit "
+            "distribution), Little's MCAR test (chi-square on missing patterns, "
+            "classifying as MCAR / Not MCAR), and baseline balance verification "
+            "(SMD per covariate, flagging |SMD|>0.1). "
+            "Stage 2 (Analysis): for longitudinal data, MMRM with random intercept "
+            "(compound-symmetry) and cLDA with constrained baseline; for missing-not-MCAR "
+            "columns, MICE with m=5 imputations and Rubin's Rules pooling (total variance "
+            "T = U_within + (1+1/m)*B_between); effect sizes as Cohen's d with "
+            "bootstrap 95% CI (1000 resamples); post-hoc power via TTestIndPower. "
+            "Stage 3 (Correction): Bonferroni for primary endpoints (FWER control), "
+            "Benjamini-Hochberg FDR for secondary endpoints (FDR control), hierarchical "
+            "gatekeeping (secondary results gated on primary significance). "
+            "The three-stage result is attached to FinalReportSchema.clinical_analysis "
+            "and rendered as a structured Markdown section in the static report, which "
+            "feeds the LLM synthesis step."
+        ),
+        "alternatives": [
+            "Single-pass t-test/ANOVA pipeline without multiplicity correction "
+            "(rejected: inflates FWER beyond nominal alpha, violates ICH E9 §2.2.5).",
+            "Unstructured covariance MMRM (rejected: requires substantially more data "
+            "and cannot be reliably fitted on small datasets; compound-symmetry is a "
+            "conservative approximation that is explicitly disclosed).",
+            "Predictive Mean Matching (PMM) for MICE (rejected: not available in "
+            "sklearn IterativeImputer; BayesianRidge is used as an approximation and "
+            "is disclosed as a limitation).",
+            "GRADE grading (rejected: requires manual domain-expert assessment; "
+            "handled by the evidence-strength hierarchy instead — see ADL-005).",
+        ],
+        "consequences": (
+            "The three-stage framework adds ~5-60 seconds to the static report step "
+            "depending on dataset size and MMRM/MICE convergence.  All approximations "
+            "(compound-symmetry covariance, cross-sectional d for longitudinal endpoints, "
+            "BayesianRidge imputation) are disclosed in the Statistical Methodology "
+            "chapter of the report.  Note: ADL-003 lists MICE under 'alternatives "
+            "considered — rejected' in the context of the column-exclusion policy; "
+            "MICE is nonetheless implemented here as a conditional analysis step for "
+            "Not-MCAR columns that pass the column-retention threshold (<50% missing)."
+        ),
+        "references": [
+            "ICH E9 (1998) Statistical Principles for Clinical Trials §2.2.5",
+            "ICH E9 R1 Addendum (2019) Estimands and Missing Data §3.3",
+            "FDA Guidance (2021) Adjusting for Covariates in Randomized Clinical Trials",
+            "FDA Draft Guidance (2017) Multiple Endpoints in Clinical Trials",
+            "Rubin (1987) Multiple Imputation for Nonresponse in Surveys",
+            "Liu et al. (2009) Pharmaceutical Statistics 8(4):274-289 — MMRM and cLDA",
+            "Benjamini & Hochberg (1995) JRSS-B 57(1):289-300 — FDR control",
+            "Cohen (1988) Statistical Power Analysis for the Behavioral Sciences, 2nd ed.",
+        ],
+    },
 ]
 
 

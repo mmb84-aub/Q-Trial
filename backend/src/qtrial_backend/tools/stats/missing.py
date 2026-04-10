@@ -167,12 +167,15 @@ def little_mcar_test(df: pd.DataFrame) -> dict:
                 "chi_square": None,
                 "degrees_of_freedom": None,
                 "p_value": None,
-                "classification": "MCAR",
+                "classification": "Complete data",
                 "n_patterns": 1,
                 "missing_columns": [],
                 "interpretation": (
-                    "No missing data found — MCAR classification is not applicable."
+                    "No missing data found; missingness classification is not applicable."
                 ),
+                "test_used": "Little's MCAR test (not run — no missing data)",
+                "test_determines": "N/A",
+                "recommendation": "No action needed; dataset is complete.",
             }
         }
 
@@ -200,18 +203,29 @@ def little_mcar_test(df: pd.DataFrame) -> dict:
         chi2_val, df_val = _little_mcar_manual(num_df[missing_cols])
         p_value = float(1.0 - chi2_dist.cdf(chi2_val, df=df_val))
 
-    # Classify
-    classification = "MCAR" if p_value >= 0.05 else "MAR or MNAR"
+    # Classify — Little's test can only assess MCAR vs not-MCAR.
+    # It cannot distinguish MAR from MNAR; that requires domain knowledge.
+    classification = "MCAR" if p_value >= 0.05 else "Not MCAR"
 
     if classification == "MCAR":
         interpretation = (
-            f"Fail to reject MCAR (p={p_value:.3f}): missingness appears completely "
-            "at random — listwise deletion is unbiased."
+            f"Little's MCAR test: fail to reject (p={p_value:.3f}). "
+            "Missingness pattern is consistent with MCAR. "
+            "Complete-case analysis or listwise deletion is appropriate."
+        )
+        recommendation = (
+            "No special handling required; listwise deletion is unbiased under MCAR."
         )
     else:
         interpretation = (
-            f"Reject MCAR (p={p_value:.3f}): missingness is likely MAR or MNAR — "
-            "consider MICE imputation to avoid biased estimates."
+            f"Little's MCAR test: reject MCAR (p={p_value:.3f}). "
+            "Missingness is not completely at random. "
+            "Note: this test cannot distinguish MAR from MNAR — "
+            "that determination requires domain knowledge or sensitivity analysis."
+        )
+        recommendation = (
+            "If MAR is clinically plausible, MICE imputation is recommended. "
+            "If MNAR is suspected, consider pattern-mixture models or sensitivity analysis."
         )
 
     # Count unique patterns across missing columns only
@@ -227,5 +241,10 @@ def little_mcar_test(df: pd.DataFrame) -> dict:
             "n_patterns": n_patterns,
             "missing_columns": missing_cols,
             "interpretation": interpretation,
+            "test_used": "Little's MCAR test (chi-square approximation)",
+            "test_determines": (
+                "MCAR vs Not MCAR only; cannot distinguish MAR from MNAR"
+            ),
+            "recommendation": recommendation,
         }
     }
