@@ -70,10 +70,14 @@ Romero et al. (2022) tested 8 relevance measures on 12 biomedical datasets and f
 
 Build a full M×M pairwise redundancy matrix where M is the number of candidate columns.
 
+**Missing value handling:** For each pairwise correlation, use pairwise deletion (remove rows where either column contains NaN, compute correlation on remaining complete pairs). This maximizes the sample size for each correlation estimate. Document the effective N for each pair and warn if any pair has N < 10 (unreliable correlation).
+
 - Numeric vs numeric: absolute Pearson correlation (already in profile object, extract directly)
 - Involving categorical: Cramér's V from `scipy.stats.chi2_contingency`
 - Take absolute values of all entries
 - Set diagonal to zero
+
+**Normalization:** After building the raw redundancy matrix, normalize all entries to [0, 1] by dividing each entry by the maximum pairwise redundancy across the entire matrix. This ensures that the λ parameter (default 0.5) applies consistently regardless of the data's natural correlation scale.
 
 **Literature backing:**  
 Skolik et al. (2021) showed that correlation-aware redundancy penalisation improves quantum-inspired feature selection by 15–20% over methods that use relevance alone.
@@ -94,9 +98,15 @@ Where:
 - $\lambda$ = penalty weight (default `0.5`, configurable)
 
 **QUBO matrix construction:**
-- Diagonal entries: $Q_{ii} = -r_i$ (negative because high relevance is rewarded and we minimise)
-- Upper-triangular off-diagonal: $Q_{ij} = \lambda \cdot c_{ij}$ for $i < j$
+- Diagonal entries: $Q_{ii} = -r_i$ (negative because high relevance is rewarded and we minimise). Use the normalized relevance scores from Step 1.
+- Upper-triangular off-diagonal: $Q_{ij} = \lambda \cdot c_{ij}$ for $i < j$, where $c_{ij}$ is the normalized redundancy from Step 2.
 - Lower-triangular: set to zero (upper-triangular QUBO form)
+
+**Order of operations (critical for consistent scaling):**
+1. Normalize relevance to [0, 1]: $r_i \leftarrow r_i / \max(r)$
+2. Normalize redundancy to [0, 1]: $c_{ij} \leftarrow c_{ij} / \max(c)$
+3. Construct Q using normalized values
+4. This ensures λ = 0.5 means: give 50% penalty weight to redundancy relative to missing out on relevance
 
 **Lambda default justification:**  
 Romero et al. (2022) found $\lambda \in [0.3, 0.7]$ optimal across 12 biomedical datasets. `0.5` gives equal weight to relevance and redundancy and is the recommended default. Make it a configurable parameter.
@@ -123,37 +133,52 @@ selected_columns = [col for col, val in best_sample.items() if val == 1]
 
 ### 3.5 Step 5 — Apply Hard Constraints
 
-After the solver returns its sample, enforce these rules unconditionally in code:
+After the solver returns its sample, enforce these rules unconditionally in code **in this exact order:**
 
-1. **Always include the outcome column** if one was designated. Remove it from the candidate set before building Q, then add it back to the selected set after solving.
-2. **Never include excluded columns.** Filter out any column already excluded by the profiler (>50% missingness) before building Q. They should never enter the candidate set.
-3. **Minimum selection floor.** If the solver returns fewer than 5 columns, override and take the top 10 by relevance score. The solver occasionally over-penalises on small datasets with strong inter-correlations.
-4. **Maximum selection cap.** If the solver returns more than 20 columns, take the top 20 by relevance score from the selected set. This keeps the statistical agent focused.
+1. **Outcome column handling (always first):**
+   - BEFORE building Q: Remove the outcome column from the candidate set (it cannot be a candidate for selection).
+   - AFTER solving: If an outcome column was designated and is not already in the solution, forcibly add it to the selected set.
+   - If no outcome was designated, skip this step.
+   - Rationale: The outcome column must always be in the dataset passed to the agent so it can analyze it as the dependent variable.
+
+2. **Filter excluded columns:** Remove any column already excluded by the profiler (>50% missingness) before building Q. They should never enter the candidate set. If any excluded column appears in the solver solution (should not happen), remove it.
+
+3. **Minimum selection floor:** If the solver returns fewer than 5 columns (excluding outcome if added in step 1), override and take the top 5 **additional** columns by relevance score (plus the outcome if applicable, making at least 6 total). The solver occasionally over-penalises on small datasets with strong inter-correlations.
+
+4. **Maximum selection cap:** If the solver returns more than 20 columns (including outcome), take the top 20 by relevance score from the selected set, ensuring the outcome column remains in the top 20 if one was designated. This keeps the statistical agent focused.
 
 ---
 
 ### 3.6 Step 6 — Validate Against Classical Baseline
 
-After selecting features, compute two numbers and log them both:
+After selecting features, compute three metrics and log them all:
 
-**Before:** mean absolute pairwise correlation across all candidate columns  
-**After:** mean absolute pairwise correlation across selected columns only
+**Before:** mean absolute pairwise correlation across all candidate columns (source: same candidates passed to QUBO solver)  
+**After:** mean absolute pairwise correlation across selected columns only  
+**Reduction:** percentage point reduction from before to after
 
 ```python
 import numpy as np
 
 def mean_pairwise_correlation(df, columns):
+    """Compute mean absolute pairwise correlation, handling NaN via pairwise deletion."""
+    if len(columns) < 2:
+        return 0.0  # Edge case: cannot compute pairwise correlation with < 2 columns
     corr = df[columns].corr().abs()
     upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
     return upper.stack().mean()
 
 redundancy_before = mean_pairwise_correlation(df, all_candidate_columns)
 redundancy_after  = mean_pairwise_correlation(df, selected_columns)
-redundancy_reduction = (redundancy_before - redundancy_after) / redundancy_before
+redundancy_reduction_pct = (redundancy_before - redundancy_after) / redundancy_before * 100  # as percentage
+
+print(f"Redundancy before selection: {redundancy_before:.3f}")
+print(f"Redundancy after selection:  {redundancy_after:.3f}")
+print(f"Reduction (percentage):      {redundancy_reduction_pct:.1f}%")
 ```
 
 **Validation rule:**  
-If `redundancy_after >= redundancy_before` (the selector made things worse or equal), log a warning, fall back to the top-N columns by relevance score, and set `selection_method = "relevance_fallback"` in the output. This should not happen in normal operation but is a safety net.
+If `redundancy_after >= redundancy_before` (the selector made things worse or equal), log a warning, fall back to the top-N columns (up to 20) by relevance score alone, and set `selection_method = "relevance_fallback"` in the output. This should not happen in normal operation but is a safety net. A negligible reduction (< 1%) also triggers this fallback, with `selection_method = "relevance_fallback_near_zero"`.
 
 **Literature backing:**  
 Skolik et al. (2021) used mean pairwise correlation reduction as the primary validation metric for quantum-inspired feature selection. A reduction of 20% or more indicates the selector is working correctly.
@@ -175,7 +200,7 @@ Return a dict with this exact structure so downstream components can consume it 
     },
     "redundancy_before": 0.61,                        # float — mean abs pairwise corr before
     "redundancy_after": 0.38,                         # float — mean abs pairwise corr after
-    "redundancy_reduction": 0.38,                     # float — fractional reduction
+    "redundancy_reduction_pct": 38.0,                # float — percentage reduction (0–100)
     "n_candidates": 18,                               # int — columns that entered the solver
     "n_selected": 9,                                  # int — columns selected
     "solver": "simulated_annealing",                  # str

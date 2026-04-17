@@ -10,7 +10,7 @@ report is purely data-driven.
 
 import datetime
 import re
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import pandas as pd
 from rich.console import Console
@@ -509,17 +509,10 @@ def build_static_report(
     df: pd.DataFrame,
     dataset_name: str,
     emit: Callable | None = None,
-    quantum_evidence: Optional[dict] = None,
 ) -> str:
     """
     Run the full static analysis pipeline and return a Markdown report string.
     This function is deterministic — no LLM is involved.
-    
-    Args:
-        df: The dataframe to analyze
-        dataset_name: Name of the dataset
-        emit: Optional callback for progress updates
-        quantum_evidence: Optional QUBO feature selection evidence dict
     """
     # Ensure tools are registered
     import qtrial_backend.tools  # noqa: F401
@@ -564,31 +557,6 @@ def build_static_report(
         f"# Static Analysis Report — {dataset_name}",
         f"> Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} · Fully deterministic, no LLM",
         "",
-    ]
-
-    # Add Variable Selection section if quantum evidence is provided
-    if quantum_evidence is not None:
-        n_selected = quantum_evidence.get("n_selected", 0)
-        n_candidates = quantum_evidence.get("n_candidates", 0)
-        redundancy_before = quantum_evidence.get("redundancy_before", 0.0)
-        redundancy_after = quantum_evidence.get("redundancy_after", 0.0)
-        redundancy_reduction = quantum_evidence.get("redundancy_reduction", 0.0)
-        selected_columns = quantum_evidence.get("selected_columns", [])
-        excluded_columns = quantum_evidence.get("excluded_columns", [])
-        
-        var_selection_section = (
-            "## Variable Selection\n\n"
-            f"Before statistical analysis, {n_selected} variables were selected from {n_candidates} total "
-            f"using QUBO-based combinatorial optimisation. This reduces redundancy between variables and "
-            f"focuses the analysis on the strongest signals relative to the outcome.\n\n"
-            f"Mean correlation between variables reduced from {redundancy_before*100:.0f}% to "
-            f"{redundancy_after*100:.0f}% ({redundancy_reduction*100:.0f}% reduction).\n\n"
-            f"**Selected variables:** {', '.join(selected_columns)}\n\n"
-            f"**Variables not analysed:** {', '.join(excluded_columns) if excluded_columns else 'None'}\n"
-        )
-        sections.extend([var_selection_section, ""])
-
-    sections.extend([
         _run("Overview",          _section_overview,       df, dataset_name),
         "",
         _run("Data Quality",      _section_data_quality,   ctx),
@@ -600,7 +568,7 @@ def build_static_report(
         _run("Normality Tests",   _section_normality,      ctx),
         "",
         _run("Correlation Matrix",_section_correlation,    ctx),
-    ])
+    ]
 
     if treatment_col:
         sections += ["", _run("Baseline Balance", _section_baseline_balance, ctx, treatment_col)]

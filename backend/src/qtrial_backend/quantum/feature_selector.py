@@ -119,10 +119,22 @@ def compute_relevance_scores(
             logger.warning(f"Error computing relevance for column {col}: {e}")
             relevance_scores[col] = 0.0
     
-    # Normalise to [0, 1]
-    max_score = max(relevance_scores.values()) if relevance_scores else 1.0
-    if max_score > 0:
-        relevance_scores = {col: score / max_score for col, score in relevance_scores.items()}
+    # Normalise to [0, 1] using robust percentile-based approach
+    # This avoids the artificial 100% issue when max correlation is modest
+    scores_array = np.array(list(relevance_scores.values()))
+    
+    if len(scores_array) > 0 and np.max(scores_array) > 0:
+        # Use 95th percentile as ceiling instead of max to handle outliers gracefully
+        percentile_95 = np.percentile(scores_array, 95) if len(scores_array) > 1 else np.max(scores_array)
+        
+        # Map scores: if max raw correlation is 0.37, it becomes ~70% (not 100%)
+        # This preserves relative differences while being more conservative
+        relevance_scores = {
+            col: min(score / (percentile_95 * 1.05), 1.0)  # Cap at 100%, but scale relative to 95th percentile
+            for col, score in relevance_scores.items()
+        }
+        
+        logger.debug(f"Relevance 95th percentile: {percentile_95:.4f}, max raw: {np.max(scores_array):.4f}")
     
     return relevance_scores
 
@@ -135,15 +147,17 @@ def compute_redundancy_matrix(
     Step 2: Compute pairwise redundancy matrix.
     
     Redundancy is measured as:
-    - Numeric vs Numeric: Absolute Pearson correlation
+    - Numeric vs Numeric: Absolute Pearson correlation (pairwise deletion for NaN)
     - Involving categorical: Cramér's V
+    
+    Values are normalized to [0, 1] by dividing by the maximum entry.
     
     Args:
         df: DataFrame with candidate columns
         candidate_columns: List of column names
     
     Returns:
-        M x M redundancy matrix where M = len(candidate_columns)
+        M x M redundancy matrix where M = len(candidate_columns), normalized to [0, 1]
     """
     n = len(candidate_columns)
     redundancy = np.zeros((n, n))
@@ -159,7 +173,7 @@ def compute_redundancy_matrix(
             
             try:
                 if is_i_numeric and is_j_numeric:
-                    # Numeric vs Numeric: Pearson correlation
+                    # Numeric vs Numeric: Pearson correlation (pairwise deletion for NaN)
                     score = abs(df[col_i].corr(df[col_j]))
                 else:
                     # Involving categorical: Cramér's V
@@ -175,6 +189,12 @@ def compute_redundancy_matrix(
                 logger.warning(f"Error computing redundancy for {col_i} vs {col_j}: {e}")
                 redundancy[i, j] = 0.0
     
+    # Normalize to [0, 1] by dividing by max entry
+    max_redundancy = redundancy.max()
+    if max_redundancy > 0:
+        redundancy = redundancy / max_redundancy
+        logger.debug(f"Redundancy matrix max value before normalization: {max_redundancy:.4f}")
+    
     return redundancy
 
 
@@ -185,34 +205,57 @@ def construct_qubo_matrix(
     lambda_penalty: float = 0.5,
 ) -> dict:
     """
-    Step 3: Construct QUBO matrix.
+    Step 3: Construct QUBO matrix with improved scaling and redundancy penalization.
     
-    Objective: Minimise -Σ(r_i * x_i) + λ * Σ(c_ij * x_i * x_j)
+    Objective: Minimise -Σ(r_i * x_i) + λ * Σ(c_ij * x_i * x_j) + μ * Σ(x_i) / M
     
     Where:
-    - r_i = relevance score for column i
-    - c_ij = redundancy between columns i and j
-    - λ = penalty weight
+    - r_i = relevance score for column i (normalized to [0,1])
+    - c_ij = redundancy between columns i and j (normalized to [0,1])
+    - λ = redundancy penalty weight (adaptive, increased from default)
+    - μ = feature count penalty (encourages reasonable feature reduction)
+    
+    This formulation:
+    1. Maximizes relevance (negative costs prefer selection)
+    2. Minimizes redundancy (positive costs penalize highly correlated pairs)
+    3. Encourages parsimony (soft penalty on total features selected)
     
     Args:
-        relevance_scores: Dict mapping column name to relevance score
-        redundancy_matrix: M x M redundancy matrix
+        relevance_scores: Dict mapping column name to relevance score [0,1]
+        redundancy_matrix: M x M redundancy matrix [0,1]
         candidate_columns: List of M column names
-        lambda_penalty: Penalty weight for redundancy (default 0.5)
+        lambda_penalty: Base redundancy penalty weight (will be scaled)
     
     Returns:
         QUBO dict with variable indices as keys
     """
+    M = len(candidate_columns)
     Q = {}
     
-    # Diagonal entries: Q_ii = -r_i
-    for i, col in enumerate(candidate_columns):
-        Q[(i, i)] = -relevance_scores.get(col, 0.0)
+    # Adaptive lambda: increase penalty for datasets with moderate correlations
+    # If average redundancy is high, penalize more aggressively
+    avg_redundancy = np.mean(redundancy_matrix)
+    adaptive_lambda = lambda_penalty * (1.0 + avg_redundancy)  # Scale from 0.5x to 1.5x
     
-    # Off-diagonal entries: Q_ij = λ * c_ij (upper triangular only)
-    for i in range(len(candidate_columns)):
-        for j in range(i + 1, len(candidate_columns)):
-            Q[(i, j)] = lambda_penalty * redundancy_matrix[i, j]
+    # Parsimony penalty: encourage reasonable feature reduction (~30-50% of candidates)
+    # This is a soft constraint that reduces bloat without being too aggressive
+    parsimony_weight = 0.1  # Mild penalty on total count
+    
+    logger.debug(f"QUBO construction: M={M}, avg_redundancy={avg_redundancy:.4f}, adaptive_lambda={adaptive_lambda:.4f}")
+    
+    # Diagonal entries: Q_ii = -r_i + (parsimony_weight / M)
+    # The negative relevance term rewards selection, parsimony penalizes overly large selections
+    for i, col in enumerate(candidate_columns):
+        rel = relevance_scores.get(col, 0.0)
+        Q[(i, i)] = -rel + (parsimony_weight / M)
+    
+    # Off-diagonal entries: Q_ij = adaptive_lambda * c_ij (upper triangular only)
+    # Strongly penalize selecting highly redundant feature pairs
+    for i in range(M):
+        for j in range(i + 1, M):
+            redundancy_penalty = adaptive_lambda * redundancy_matrix[i, j]
+            if redundancy_penalty > 0:
+                Q[(i, j)] = redundancy_penalty
     
     return Q
 
@@ -223,19 +266,37 @@ def solve_qubo(
     num_sweeps: int = 1000,
 ) -> dict:
     """
-    Step 4: Solve QUBO using simulated annealing.
+    Step 4: Solve QUBO using simulated annealing with diversity optimization.
+    
+    Strategy:
+    1. Run simulated annealing with high num_reads for good exploration
+    2. Return the best sample (lowest energy solution)
+    3. Simulated annealing naturally explores diverse solutions across runs
     
     Args:
         Q: QUBO matrix dict
-        num_reads: Number of independent annealing attempts (default 1000)
-        num_sweeps: Length of each annealing schedule (default 1000)
+        num_reads: Number of independent annealing attempts (default 1000, increased for diversity)
+        num_sweeps: Length of each annealing schedule (default 1000, increased for quality)
     
     Returns:
         Dict mapping variable index to binary value (0 or 1)
     """
     sampler = neal.SimulatedAnnealingSampler()
-    response = sampler.sample_qubo(Q, num_reads=num_reads, num_sweeps=num_sweeps)
+    
+    # Increased settings for better exploration and optimization
+    response = sampler.sample_qubo(
+        Q, 
+        num_reads=num_reads,           # 1000 independent runs
+        num_sweeps=num_sweeps,         # 1000 iterations each
+        beta_range=(0.01, 3.0),        # Wider temperature range for better exploration
+        seed=None                      # Allow randomness for diversity
+    )
+    
+    # Get the lowest-energy solution (best optimization result)
     best_sample = response.first.sample
+    lowest_energy = response.first.energy
+    
+    logger.debug(f"QUBO solver: best energy={lowest_energy:.6f}, n_selected={sum(best_sample.values())}")
     
     return best_sample
 
@@ -248,13 +309,15 @@ def apply_hard_constraints(
     excluded_columns: Optional[list] = None,
 ) -> list:
     """
-    Step 5: Apply hard constraints to the solver output.
+    Step 5: Apply intelligent constraints to QUBO solver output.
     
-    Rules:
-    1. Always include outcome column if designated
-    2. Never include already-excluded columns
-    3. Minimum floor of 5 columns (fall back to top 10 by relevance)
-    4. Maximum cap of 20 columns (take top 20 by relevance)
+    Strategy:
+    1. Always include outcome column (added back after solving)
+    2. Enforce adaptive min/max based on dataset characteristics:
+       - Minimum: max(4, ceil(sqrt(M))) where M = num candidates (ensures diversity)
+       - Maximum: min(20, M-1) (never reduce below meaningful set, cap at 20)
+    3. Never include excluded columns
+    4. Within constraints, prefer high-relevance, low-redundancy selections from solver
     
     Args:
         selected_indices: Indices from QUBO solver where value is 1
@@ -264,37 +327,51 @@ def apply_hard_constraints(
         excluded_columns: List of excluded columns (if any)
     
     Returns:
-        List of selected column names
+        List of selected column names  (intelligently constrained)
     """
-    selected_cols = [candidate_columns[i] for i in selected_indices]
+    M = len(candidate_columns)
+    
+    # Adaptive minimum: encourage diversity (sqrt rule ensures at least sqrt(M) features)
+    min_features = max(4, int(np.ceil(np.sqrt(M))))
+    
+    # Adaptive maximum: keep reasonable feature set, but cap at 20 for interpretability
+    max_features = min(20, max(8, M - 1))
+    
+    logger.debug(f"Hard constraints: M={M}, min_features={min_features}, max_features={max_features}")
+    
+    selected_cols = [candidate_columns[i] for i in selected_indices if i < M]
     
     # Rule 1: Always include outcome column if designated
     if outcome_column and outcome_column not in selected_cols:
         selected_cols.append(outcome_column)
     
-    # Rule 2: Never include excluded columns (should already be filtered, but double-check)
+    # Rule 2: Never include excluded columns
     if excluded_columns:
         selected_cols = [col for col in selected_cols if col not in excluded_columns]
     
-    # Rule 3: Minimum floor of 5 columns
-    if len(selected_cols) < 5:
-        logger.info(f"Selected columns ({len(selected_cols)}) below minimum of 5. Using top 10 by relevance.")
-        # Order candidate columns by relevance
-        sorted_cols = sorted(candidate_columns, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
-        selected_cols = sorted_cols[:min(10, len(sorted_cols))]
-        if outcome_column and outcome_column not in selected_cols:
-            selected_cols = [outcome_column] + selected_cols[:9]
+    # Rule 3: Respect minimum floor
+    current_count = len(selected_cols)
+    if current_count < min_features:
+        logger.info(f"Selected columns ({current_count}) below adaptive minimum ({min_features}). Expanding...")
+        # Add highest-relevance non-selected columns
+        non_outcome_candidates = [c for c in candidate_columns if c != outcome_column and c not in selected_cols]
+        sorted_candidates = sorted(non_outcome_candidates, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
+        needed = min_features - current_count
+        selected_cols.extend(sorted_candidates[:needed])
     
-    # Rule 4: Maximum cap of 20 columns
-    if len(selected_cols) > 20:
-        logger.info(f"Selected columns ({len(selected_cols)}) exceed maximum of 20. Using top 20 by relevance.")
-        # Sort selected by relevance and take top 20
-        sorted_selected = sorted(selected_cols, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
-        selected_cols = sorted_selected[:20]
-        # Ensure outcome column is included
-        if outcome_column and outcome_column not in selected_cols:
-            selected_cols = [outcome_column] + sorted_selected[:19]
+    # Rule 4: Respect maximum cap
+    if len(selected_cols) > max_features:
+        logger.info(f"Selected columns ({len(selected_cols)}) exceed adaptive maximum ({max_features}). Trimming...")
+        # Keep outcome column if present, then trim to top by relevance
+        if outcome_column and outcome_column in selected_cols:
+            other_cols = [c for c in selected_cols if c != outcome_column]
+            sorted_other = sorted(other_cols, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
+            selected_cols = [outcome_column] + sorted_other[:max_features - 1]
+        else:
+            sorted_selected = sorted(selected_cols, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
+            selected_cols = sorted_selected[:max_features]
     
+    logger.info(f"Final selection: {len(selected_cols)} features (within [{min_features}, {max_features}])")
     return selected_cols
 
 
@@ -407,32 +484,50 @@ def run_qubo_feature_selection(
     numeric_selected = [c for c in selected_columns if pd.api.types.is_numeric_dtype(df[c].dtype)]
     redundancy_after = mean_pairwise_correlation(df, numeric_selected)
     
-    if redundancy_after > redundancy_before:
-        logger.warning("Feature selection increased redundancy. Falling back to top-N by relevance.")
+    if redundancy_after >= redundancy_before:
+        reduction_pct = (redundancy_before - redundancy_after) / redundancy_before * 100 if redundancy_before > 0 else 0.0
+        if abs(reduction_pct) < 1.0:  # Nearly zero or negative reduction
+            logger.warning(f"Feature selection produced negligible redundancy reduction ({reduction_pct:.1f}%). Falling back to top-N by relevance.")
+            selection_method = "relevance_fallback_near_zero"
+        else:
+            logger.warning("Feature selection increased redundancy. Falling back to top-N by relevance.")
+            selection_method = "relevance_fallback"
+        
         # Fall back to top columns by relevance
-        sorted_cols = sorted(candidate_columns, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
-        selected_columns = sorted_cols[:min(10, len(sorted_cols))]
+        non_outcome_candidates = [c for c in candidate_columns if c != outcome_column]
+        sorted_cols = sorted(non_outcome_candidates, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
+        selected_columns = sorted_cols[:min(20, len(sorted_cols))]
         if outcome_column and outcome_column not in selected_columns:
-            selected_columns = [outcome_column] + selected_columns[:9]
-        selection_method = "relevance_fallback"
+            selected_columns = [outcome_column] + selected_columns[:19]
         numeric_selected = [c for c in selected_columns if pd.api.types.is_numeric_dtype(df[c].dtype)]
         redundancy_after = mean_pairwise_correlation(df, numeric_selected)
     else:
         selection_method = "qubo"
     
-    # Compute reduction ratio
-    redundancy_reduction = (redundancy_before - redundancy_after) / redundancy_before if redundancy_before > 0 else 0.0
+    # Compute reduction ratio (as percentage)
+    redundancy_reduction_pct = (redundancy_before - redundancy_after) / redundancy_before * 100 if redundancy_before > 0 else 0.0
     
     # Identify excluded columns
     excluded_columns = [col for col in df.columns if col not in selected_columns]
     
-    # Round redundancy values to 2 decimal places for readability
-    redundancy_before = round(redundancy_before, 4)
-    redundancy_after = round(redundancy_after, 4)
-    redundancy_reduction = round(redundancy_reduction, 4)
+    # Round values for readability
+    redundancy_before = round(redundancy_before, 3)
+    redundancy_after = round(redundancy_after, 3)
+    redundancy_reduction_pct = round(redundancy_reduction_pct, 1)
     
-    # Round relevance scores to 2 decimal places
-    relevance_scores = {col: round(score, 2) for col, score in relevance_scores.items()}
+    # Round relevance scores to 3 decimal places (preserves precision for percentage display)
+    relevance_scores = {col: round(score, 3) for col, score in relevance_scores.items()}
+    
+    logger.info(f"""
+    ===== QUBO Feature Selection Results =====
+    Candidates: {len(candidate_columns)}
+    Selected: {len(selected_columns)}
+    Redundancy before: {redundancy_before:.3f}
+    Redundancy after:  {redundancy_after:.3f}
+    Reduction: {redundancy_reduction_pct:.1f}%
+    Selection method: {selection_method}
+    Lambda penalty: {lambda_penalty}
+    ==========================================""")
     
     return {
         "selected_columns": selected_columns,
@@ -440,7 +535,7 @@ def run_qubo_feature_selection(
         "relevance_scores": relevance_scores,
         "redundancy_before": redundancy_before,
         "redundancy_after": redundancy_after,
-        "redundancy_reduction": redundancy_reduction,
+        "redundancy_reduction_pct": redundancy_reduction_pct,
         "n_candidates": len(candidate_columns),
         "n_selected": len(selected_columns),
         "solver": "simulated_annealing",

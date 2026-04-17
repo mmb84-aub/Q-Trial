@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -21,14 +21,14 @@ ID_HINTS = {"id", "subject", "patient", "subjectid", "patientid", "subject_id", 
 
 # ── main function ─────────────────────────────────────────────────────────────
 
-def build_dataset_evidence(df: pd.DataFrame, quantum_evidence: Optional[dict] = None) -> dict:
+def build_dataset_evidence(df: pd.DataFrame, quantum_evidence: dict[str, Any] | None = None) -> dict:
     """
     Compute deterministic, JSON-friendly evidence from a DataFrame.
     Does NOT call any LLM.  All values are Python primitives.
     
     Args:
-        df: The data frame to analyze
-        quantum_evidence: Optional QUBO feature selection evidence dict
+        df: Input DataFrame
+        quantum_evidence: Optional output from QUBO feature selection
     """
     evidence: dict[str, Any] = {}
 
@@ -121,6 +121,7 @@ def build_dataset_evidence(df: pd.DataFrame, quantum_evidence: Optional[dict] = 
             cat_distributions[col] = {str(k): int(v) for k, v in counts.items()}
     evidence["categorical_distributions"] = cat_distributions
 
+    # 8) Add quantum evidence if provided
     if quantum_evidence is not None:
         evidence["quantum_feature_selection"] = quantum_evidence
 

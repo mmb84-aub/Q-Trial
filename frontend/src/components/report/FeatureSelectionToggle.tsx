@@ -32,8 +32,100 @@ export function FeatureSelectionToggle({ quantum }: Props) {
         <h3 style={{ fontSize: "1rem", fontWeight: 600, margin: "0 0 1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
           🎯 Feature Selection Details
         </h3>
+      </div>
 
-        {/* Tab buttons */}
+      {/* Metrics summary */}
+      <div style={{ padding: "1rem 1.5rem", background: "#f3f4f6", borderBottom: "1px solid #e5e7eb", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem" }}>
+        <div>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280", textTransform: "uppercase", fontWeight: 600, marginBottom: "0.25rem" }}>
+            Selection
+          </div>
+          <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#059669" }}>
+            {quantum.n_selected} / {quantum.n_candidates}
+          </div>
+          <div style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
+            {((quantum.n_selected / quantum.n_candidates) * 100).toFixed(0)}% selected
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280", textTransform: "uppercase", fontWeight: 600, marginBottom: "0.25rem" }}>
+            Redundancy Reduction
+          </div>
+          <div style={{ fontSize: "1.1rem", fontWeight: 700, color: quantum.redundancy_reduction_pct >= 15 ? "#059669" : "#f59e0b" }}>
+            {quantum.redundancy_reduction_pct.toFixed(1)}%
+          </div>
+          <div style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
+            {quantum.redundancy_before.toFixed(3)} → {quantum.redundancy_after.toFixed(3)}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280", textTransform: "uppercase", fontWeight: 600, marginBottom: "0.25rem" }}>
+            Method
+          </div>
+          <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "#1f2937" }}>
+            {quantum.selection_method === "qubo" ? "QUBO" : "Relevance Only"}
+          </div>
+          <div style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
+            λ = {quantum.lambda_penalty}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280", textTransform: "uppercase", fontWeight: 600, marginBottom: "0.25rem" }}>
+            Solver
+          </div>
+          <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "#1f2937" }}>
+            {quantum.solver === "simulated_annealing" ? "Simulated Annealing" : quantum.solver}
+          </div>
+          <div style={{ fontSize: "0.8rem", color: "#9ca3af" }}>
+            {quantum.num_reads} reads
+          </div>
+        </div>
+      </div>
+
+      {/* Redundancy Analysis Section */}
+      <div style={{ padding: "1rem 1.5rem", borderBottom: "1px solid #e5e7eb" }}>
+        <h4 style={{ fontSize: "0.9rem", fontWeight: 600, margin: "0 0 0.75rem", color: "#374151", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          📊 Redundancy Analysis
+        </h4>
+        <div style={{ fontSize: "0.85rem", color: "#4b5563", lineHeight: 1.5, marginBottom: "0.75rem" }}>
+          <p style={{ margin: "0 0 0.5rem" }}>
+            <strong>Mean pairwise correlation:</strong> Measures average correlation between selected features. Lower values indicate more independent features.
+          </p>
+          <div style={{ background: "#fff", border: "1px solid #d1d5db", borderRadius: 4, padding: "0.75rem", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1rem" }}>
+            <div>
+              <div style={{ fontSize: "0.7rem", color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Before Selection</div>
+              <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "#f59e0b" }}>{quantum.redundancy_before.toFixed(3)}</div>
+              <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>All {quantum.n_candidates} features</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ fontSize: "1.5rem", color: "#d1d5db" }}>→</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.7rem", color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>After Selection</div>
+              <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "#059669" }}>{quantum.redundancy_after.toFixed(3)}</div>
+              <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>{quantum.n_selected} independent features</div>
+            </div>
+          </div>
+        </div>
+        <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 4, padding: "0.75rem", fontSize: "0.85rem", color: "#15803d" }}>
+          <strong>Improvement:</strong> {quantum.redundancy_reduction_pct.toFixed(1)}% reduction in mean correlation achieved by excluding {quantum.n_candidates - quantum.n_selected} redundant features while preserving the most relevant ones.
+        </div>
+      </div>
+
+      {/* Feature Details Explanation */}
+      <div style={{ padding: "1rem 1.5rem", background: "#f0f9ff", borderBottom: "1px solid #e5e7eb", fontSize: "0.85rem", color: "#0369a1" }}>
+        <strong>📌 Feature Breakdown:</strong>
+        <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.5rem" }}>
+          <li><strong>Selected features</strong> are retained because they have high relevance to the outcome and low correlation with other selected features.</li>
+          <li><strong>Excluded features</strong> were redundant (highly correlated with selected features) or had low relevance, and are available for sensitivity analysis if needed.</li>
+        </ul>
+      </div>
+
+      {/* Tab buttons */}
+      <div style={{ padding: "1rem 1.5rem", borderBottom: "1px solid #e5e7eb" }}>
         <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
           <button
             onClick={() => setActiveTab("selected")}

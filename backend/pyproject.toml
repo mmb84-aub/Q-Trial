@@ -24,7 +24,6 @@ fastapi = ">=0.115.0"
 uvicorn = {extras = ["standard"], version = "^0.41.0"}
 python-multipart = ">=0.0.9"
 boto3 = "^1.42.73"
-dwave-neal = ">=0.6.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0.0"

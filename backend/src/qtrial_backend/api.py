@@ -29,7 +29,7 @@ from qtrial_backend.providers.bedrock_client import set_thread_model as set_bedr
 from qtrial_backend.report.static import build_static_report
 from qtrial_backend.dataset.treatment_detector import detect_treatment_columns
 from qtrial_backend.report.adl import build_adl
-from qtrial_backend.quantum.feature_selector import run_qubo_feature_selection
+from qtrial_backend.quantum import run_qubo_feature_selection
 
 console = Console()
 
@@ -126,10 +126,38 @@ async def run_analysis(
     except Exception:
         static_report = None
 
+    # ── QUBO Feature Selection (before statistical agent) ─────────────────────
+    # Run quantum-inspired feature selection to reduce dimensionality
+    quantum_evidence = None
+    selected_df = df
+    try:
+        from qtrial_backend.dataset.evidence import build_dataset_evidence
+        profile = build_dataset_evidence(df)
+        outcome_column = None
+        if meta and meta.outcome_column:
+            outcome_column = meta.outcome_column
+        quantum_evidence = await asyncio.to_thread(
+            run_qubo_feature_selection,
+            df,
+            profile,
+            outcome_column,
+            0.5
+        )
+        selected_df = df[quantum_evidence["selected_columns"]]
+        console.print(
+            f"[green]✓ Feature selection:[/green] "
+            f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} columns "
+            f"(redundancy reduced by {quantum_evidence['redundancy_reduction_pct']:.1f}%)"
+        )
+    except Exception as exc:
+        console.print(f"[yellow]⚠ Feature selection warning: {exc}[/yellow]")
+        quantum_evidence = None
+        selected_df = df
+
     # ── Run LLM-driven statistical agent loop ────────────────────────────────
     try:
         loop_report, tool_log = await asyncio.to_thread(
-            run_statistical_agent_loop, df, provider, dataset_name, None, None, column_dict
+            run_statistical_agent_loop, selected_df, provider, dataset_name, None, None, column_dict
         )
     except Exception as exc:
         console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
@@ -143,7 +171,7 @@ async def run_analysis(
     try:
         report = await asyncio.to_thread(
             run_agentic_insights,
-            df,
+            selected_df,
             provider,
             max_rows,
             30,
@@ -155,6 +183,7 @@ async def run_analysis(
             None,
             study_context,
             column_dict,
+            quantum_evidence,
         )
     except Exception as exc:
         raise HTTPException(
@@ -230,45 +259,9 @@ async def run_analysis_stream(
         set_openrouter_model(model if provider == "openrouter" else None)
         set_bedrock_model(model if provider == "bedrock" else None)
         try:
-            # ── 1. QUBO Feature Selection (BEFORE static report) ────────────
-            selected_df = df
-            quantum_evidence = None
+            # ── 1. Deterministic static report ───────────────────────────────
             try:
-                console.print("[bold cyan]► Feature Selection:[/bold cyan] Running QUBO optimization…")
-                outcome_column = meta.outcome_column if meta and hasattr(meta, 'outcome_column') else None
-                quantum_evidence = run_qubo_feature_selection(
-                    df=df,
-                    profile=None,  # profile not currently exposed, can be None
-                    outcome_column=outcome_column,
-                    lambda_penalty=0.5
-                )
-                selected_df = df[quantum_evidence["selected_columns"]]
-                
-                loop.call_soon_threadsafe(
-                    aq.put_nowait,
-                    {
-                        "type": "progress",
-                        "phase": "feature_selection",
-                        "message": (
-                            f"Selected {quantum_evidence['n_selected']} most relevant variables "
-                            f"from {quantum_evidence['n_candidates']} for analysis. "
-                            f"Redundancy reduced by {quantum_evidence['redundancy_reduction']*100:.0f}%."
-                        )
-                    },
-                )
-                console.print(
-                    f"  [green]✓[/green] Feature selection complete: "
-                    f"{quantum_evidence['n_selected']} of {quantum_evidence['n_candidates']} columns selected"
-                )
-            except Exception as exc:
-                console.print(f"[yellow]⚠ Feature selection warning: {exc}[/yellow]")
-                # Non-fatal — continue with original df
-                selected_df = df
-                quantum_evidence = None
-
-            # ── 2. Deterministic static report (with quantum evidence) ──────
-            try:
-                static_report = build_static_report(selected_df, dataset_name, emit=emit, quantum_evidence=quantum_evidence)
+                static_report = build_static_report(df, dataset_name, emit=emit)
             except Exception:
                 static_report = None
 
@@ -283,13 +276,42 @@ async def run_analysis_stream(
                     },
                 )
 
-            # ── 3. LLM-driven statistical agent loop ─────────────────────────
+            # ── QUBO Feature Selection (before statistical agent) ─────────────
+            quantum_evidence = None
+            selected_df = df
+            try:
+                from qtrial_backend.dataset.evidence import build_dataset_evidence
+                profile = build_dataset_evidence(df)
+                outcome_column = None
+                if meta and meta.outcome_column:
+                    outcome_column = meta.outcome_column
+                quantum_evidence = run_qubo_feature_selection(
+                    df, profile, outcome_column, 0.5
+                )
+                selected_df = df[quantum_evidence["selected_columns"]]
+                msg = (
+                    f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} "
+                    f"features (redundancy reduced by {quantum_evidence['redundancy_reduction_pct']:.1f}%)"
+                )
+                loop.call_soon_threadsafe(
+                    aq.put_nowait,
+                    {
+                        "type": "progress",
+                        "phase": "feature_selection",
+                        "message": msg,
+                    },
+                )
+            except Exception as exc:
+                console.print(f"[yellow]⚠ Feature selection warning: {exc}[/yellow]")
+                quantum_evidence = None
+                selected_df = df
+
+            # ── 2. LLM-driven statistical agent loop ─────────────────────────
             try:
                 loop_report, tool_log = run_statistical_agent_loop(
                     selected_df, provider, dataset_name, emit=emit,
                     model=model if provider in ("openrouter", "bedrock") else None,
                     column_dict=column_dict,
-                    quantum_evidence=quantum_evidence,
                 )
             except Exception as exc:
                 console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
@@ -308,7 +330,7 @@ async def run_analysis_stream(
 
             # ── 4. Full agentic + reasoning pipeline ─────────────────────────
             report = run_agentic_insights(
-                df, provider, max_rows, 30, run_judge, meta, False,
+                selected_df, provider, max_rows, 30, run_judge, meta, False,
                 analysis_report, tool_log, emit,
                 study_context, column_dict, quantum_evidence,
             )

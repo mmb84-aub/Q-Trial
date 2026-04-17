@@ -70,56 +70,35 @@ export interface MissingnessDisclosure {
   action: "excluded" | "high_missingness_section" | "listwise_deletion";
 }
 
-// ── QUBO Feature Selection Data (8.1–8.8 validations) ──────────────────────────
-
-export interface QuantumEvidence {
-  // 8.1: Relevance Scores — mapping column name to relevance [0, 1]
-  relevance_scores: Record<string, number>;
-  
-  // 8.3, 8.5, 8.6: Selected and excluded columns
-  selected_columns: string[];
-  excluded_columns: string[];
-  
-  // 8.4: Redundancy Reduction metrics
-  redundancy_before: number;      // Mean correlation before (float)
-  redundancy_after: number;       // Mean correlation after (float)
-  redundancy_reduction: number;   // Fractional reduction [0, 1]
-  
-  // 8.5, 8.6: Selection statistics
-  n_candidates: number;           // Columns entering solver
-  n_selected: number;             // Columns selected
-  
-  // 8.3: Solver properties
-  solver: string;                 // "simulated_annealing"
-  lambda_penalty: number;         // Penalty weight (default 0.5)
-  num_reads: number;              // Number of annealing reads (1000)
-  num_sweeps: number;             // Number of sweeps per read
-  
-  // 8.7: Selection method
-  selection_method: "qubo" | "relevance_fallback";
-  
-  // 8.1, 8.5: Outcome column reference
-  outcome_column: string | null;
-  
-  // 8.8: Performance timing (optional)
-  execution_time_ms?: number;
-  timing_breakdown?: Record<string, number>;  // e.g., { relevance: 10, redundancy: 45, solving: 250 }
-}
-
 export interface GroundedFindingsSchema {
   findings: GroundedFinding[];
   research_questions: ResearchQuestion[];
   synthesis: SynthesisOutput | null;
   excluded_columns: ExcludedColumn[];
   high_missingness_columns: HighMissingnessColumn[];
-  // Optional: QUBO quantum evidence (if feature selection was applied)
-  quantum_evidence?: QuantumEvidence;
 }
 
 export interface SynthesisQualityScore {
   score: number;
   rationale: string;
   rerun_triggered: boolean;
+}
+
+export interface QuantumEvidence {
+  selected_columns: string[];
+  excluded_columns: string[];
+  relevance_scores: Record<string, number>;
+  redundancy_before: number;
+  redundancy_after: number;
+  redundancy_reduction_pct: number;
+  n_candidates: number;
+  n_selected: number;
+  solver: string;
+  lambda_penalty: number;
+  num_reads: number;
+  num_sweeps: number;
+  selection_method: string;
+  outcome_column: string | null;
 }
 
 export interface InsightSynthesisOutput {
@@ -139,6 +118,7 @@ export interface FinalReport {
   synthesis_quality_score: SynthesisQualityScore | null;
   treatment_columns_excluded: string[];
   final_insights: InsightSynthesisOutput;
+  quantum_evidence: QuantumEvidence | null;
   // run_id is derived from reproducibility_log if present
   reproducibility_log: { run_id: string } | null;
 }

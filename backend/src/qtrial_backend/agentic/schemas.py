@@ -732,6 +732,13 @@ class FinalReportSchema(BaseModel):
         default_factory=list,
         description="Column names excluded as treatment group assignments.",
     )
+    quantum_evidence: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "QUBO feature selection results: selected/excluded columns, "
+            "relevance scores, redundancy metrics."
+        ),
+    )
 
 
 # ── New schemas: Clinical Search Terms, Evidence Strength, Grounded Findings ──
@@ -817,7 +824,6 @@ class GroundedFindingsSchema(BaseModel):
     synthesis: SynthesisOutput | None = None
     excluded_columns: list[ExcludedColumn] = Field(default_factory=list)
     high_missingness_columns: list[HighMissingnessColumn] = Field(default_factory=list)
-    quantum_evidence: dict | None = None  # QUBO feature selection results
 
 
 # ── New schemas: Synthesis Quality, Reproducibility Log ──────────────────────
