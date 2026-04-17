@@ -1,3 +1,13 @@
+"""
+Statistical hypothesis testing tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + outcome_col + group_col + test choice (auto|t_test|
+        mann_whitney|wilcoxon|chi_squared|fisher|anova|kruskal).
+Output: HypothesisTestResult with test name, statistic, p-value, effect size,
+        confidence interval, and normality assumption check.
+Does:   selects and runs the appropriate parametric or non-parametric test
+        based on data properties (normality, sample size, variable type).
+"""
 from __future__ import annotations
 
 import numpy as np

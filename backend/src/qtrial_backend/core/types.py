@@ -1,3 +1,11 @@
+"""
+Core type definitions shared across the pipeline.
+
+Input:  n/a (type module only).
+Output: dataclasses and type aliases used by providers, AgentLoop, and orchestrator.
+Does:   defines LLMRequest, LLMResponse, ChatResponse, Message, AgentResponse,
+        and the ProviderName literal — the lingua franca of the Q-Trial pipeline.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

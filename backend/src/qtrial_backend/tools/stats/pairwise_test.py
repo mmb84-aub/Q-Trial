@@ -1,3 +1,13 @@
+"""
+Pairwise comparison tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + outcome_col + group_col + correction method
+        (tukey|bonferroni|dunn|games_howell).
+Output: PairwiseTestResult with all group pairs, raw and adjusted p-values,
+        mean differences, and significance flags.
+Does:   runs post-hoc pairwise comparisons after a significant omnibus test
+        (ANOVA/Kruskal) to identify which specific group pairs differ.
+"""
 from __future__ import annotations
 
 import itertools

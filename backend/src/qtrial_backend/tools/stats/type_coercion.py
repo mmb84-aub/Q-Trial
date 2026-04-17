@@ -1,3 +1,13 @@
+"""
+Type coercion suggester — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + column name.
+Output: TypeCoercionResult with detected storage type, suggested semantic type
+        (numeric|categorical|ordinal|date|boolean), and coercion confidence.
+Does:   catches columns stored as the wrong dtype (e.g. numeric IDs stored
+        as strings, booleans stored as 0/1 ints) so the agent can reinterpret
+        them before running downstream statistical tools.
+"""
 from __future__ import annotations
 
 import re

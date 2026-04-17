@@ -1,3 +1,12 @@
+"""
+Outlier detection tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + column name + method (iqr|zscore|lof|isolation_forest).
+Output: OutlierResult with outlier row indices, outlier rate, and
+        threshold values used for detection.
+Does:   flags extreme values that may represent data entry errors, protocol
+        deviations, or genuine clinical events requiring investigation.
+"""
 from __future__ import annotations
 
 from typing import Optional

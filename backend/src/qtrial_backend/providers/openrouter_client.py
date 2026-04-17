@@ -1,3 +1,11 @@
+"""
+OpenRouter LLMClient implementation.
+
+Input:  LLMRequest or chat message list + OpenAI-compatible tool schemas.
+Output: LLMResponse (text) or ChatResponse (text + tool_calls).
+Does:   wraps the OpenRouter REST API (OpenAI-compatible) with API key rotation
+        and thread-safe key cycling; supports any model available on OpenRouter.
+"""
 from __future__ import annotations
 
 import json

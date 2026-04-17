@@ -1,3 +1,12 @@
+"""
+Survival analysis tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + time_col, event_col, group_col (optional).
+Output: KaplanMeierResult with median survival times, log-rank p-value,
+        and Cox proportional-hazards hazard ratios when groups are provided.
+Does:   runs Kaplan-Meier estimator (lifelines) and log-rank test for group
+        comparison; optionally fits a Cox PH model for covariate adjustment.
+"""
 from __future__ import annotations
 
 from typing import Optional

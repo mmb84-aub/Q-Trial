@@ -1,3 +1,13 @@
+"""
+Value frequency tool — Stage 4 statistical tool.
+
+Input:  AgentContext + column name + optional top_n limit.
+Output: ValueCountsResult with value → count mapping, percentage per value,
+        and a flag for columns where a single value dominates (>95%).
+Does:   produces frequency tables for categorical and low-cardinality numeric
+        columns; useful for detecting data problems like label imbalance or
+        near-constant columns.
+"""
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

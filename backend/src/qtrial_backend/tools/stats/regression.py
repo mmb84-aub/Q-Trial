@@ -1,3 +1,13 @@
+"""
+Regression analysis tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + outcome_col + predictor_cols + model type
+        (linear|logistic|poisson|cox).
+Output: RegressionResult with coefficients, standard errors, p-values,
+        confidence intervals, R²/AIC, and model diagnostics.
+Does:   fits parametric regression models for continuous, binary, count,
+        and time-to-event outcomes; supports covariate adjustment.
+"""
 from __future__ import annotations
 
 from typing import Optional

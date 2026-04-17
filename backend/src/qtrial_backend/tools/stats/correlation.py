@@ -1,8 +1,16 @@
+"""
+Correlation analysis tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + list of numeric columns + method ("pearson"|"spearman"|"kendall").
+Output: CorrelationResult with correlation matrix, top correlated pairs,
+        and p-values for each pair.
+Does:   identifies linear and rank-order associations between variables,
+        flagging strongly correlated pairs (|r| > 0.7) for multicollinearity review.
+"""
 from __future__ import annotations
 
 import pandas as pd
 from pydantic import BaseModel, Field
-
 from qtrial_backend.agent.context import AgentContext
 from qtrial_backend.tools.registry import tool
 

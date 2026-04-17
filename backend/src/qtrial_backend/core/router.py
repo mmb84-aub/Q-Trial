@@ -1,3 +1,11 @@
+"""
+LLM provider router.
+
+Input:  ProviderName literal ("openai" | "gemini" | "claude" | "openrouter" | "bedrock").
+Output: LLMClient instance (get_client) or ChatResponse (route_chat).
+Does:   maps a provider name to the correct LLMClient subclass; used by all
+        pipeline stages that make LLM calls (Stages 4, 5, 7).
+"""
 from __future__ import annotations
 
 from qtrial_backend.core.types import ProviderName

@@ -1,3 +1,11 @@
+"""
+Q-Trial CLI entry point.
+
+Input:  command-line arguments (--file, --provider, --study-context, --output)
+Output: printed analysis report + optional JSON file written to disk
+Does:   loads a CSV/XLSX dataset, runs the full 8-stage pipeline via
+        run_agentic_insights(), and renders results to the terminal.
+"""
 from __future__ import annotations
 
 import json

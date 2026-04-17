@@ -1,3 +1,13 @@
+"""
+Deterministic evidence extractor — Stage 3 (pure Python).
+
+Input:  pandas DataFrame + dataset_preview dict.
+Output: evidence dict containing: missingness percentages per column, duplicate
+        row counts, top correlations, high-cardinality column flags, and
+        frequency tables for low-cardinality columns.
+Does:   runs fixed statistical passes to extract dataset signals before any LLM
+        call; these signals anchor all downstream reasoning.
+"""
 from __future__ import annotations
 
 import math

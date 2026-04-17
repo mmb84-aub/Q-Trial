@@ -1,3 +1,11 @@
+"""
+Dataset loader — Stage 2 entry point.
+
+Input:  file path or bytes buffer (CSV or XLSX), optional missingness threshold.
+Output: pandas DataFrame with inferred dtypes + MissingnessDisclosure list.
+Does:   reads CSV/Excel files, infers column types, records columns that exceed
+        the missingness threshold so downstream stages can handle them safely.
+"""
 from __future__ import annotations
 
 from pathlib import Path

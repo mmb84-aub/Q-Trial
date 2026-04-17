@@ -1,3 +1,12 @@
+"""
+Pipeline-wide Pydantic schemas.
+
+Input:  raw dicts parsed from LLM JSON responses or tool return values.
+Output: validated, typed model instances used throughout Stages 3–8.
+Does:   defines all data contracts for the pipeline — dataset evidence, grounded
+        findings, synthesis output, and the final FinalReportSchema returned by
+        run_agentic_insights().
+"""
 from __future__ import annotations
 
 from typing import Any, Literal

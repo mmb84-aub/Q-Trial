@@ -1,3 +1,14 @@
+"""
+AgentLoop — iterative LLM ↔ tool execution engine (Stage 4).
+
+Input:  AgentContext (DataFrame, preview, evidence), system prompt, list of
+        RegisteredTool objects, LLMClient, max_iterations.
+Output: Markdown analysis_report (str) + tool_log (list[dict])
+Does:   runs a while-loop where the LLM requests tool calls, tools execute
+        against the DataFrame, results feed back to the LLM, and the loop
+        terminates when the LLM produces a final text response or max_iterations
+        is reached. Annotates confidence warnings post-loop.
+"""
 from __future__ import annotations
 
 import json

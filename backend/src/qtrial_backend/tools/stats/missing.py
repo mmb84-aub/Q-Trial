@@ -1,3 +1,12 @@
+"""
+Missingness pattern analysis tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + optional column list.
+Output: MissingnessResult with per-column missing counts and rates,
+        Little's MCAR test result (MCAR / Not MCAR), and pattern heatmap data.
+Does:   classifies missing data mechanism to guide imputation strategy —
+        MCAR supports listwise deletion; Not MCAR requires MICE or similar.
+"""
 from __future__ import annotations
 
 import numpy as np

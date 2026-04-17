@@ -1,3 +1,12 @@
+"""
+Normality testing tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + column name + optional test (shapiro|anderson|ks).
+Output: NormalityTestResult with test name, statistic, p-value, and
+        a boolean normality_rejected flag.
+Does:   determines whether a column follows a normal distribution, which
+        controls the choice between parametric and non-parametric downstream tests.
+"""
 from __future__ import annotations
 
 from typing import Optional

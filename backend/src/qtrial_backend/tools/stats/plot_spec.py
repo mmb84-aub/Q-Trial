@@ -1,3 +1,12 @@
+"""
+Plot specification generator — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + plot type + column mapping (x, y, color, facet).
+Output: PlotSpec dict with Vega-Lite compatible specification and
+        a text description of what the chart shows.
+Does:   produces declarative chart specs the frontend can render;
+        does NOT render images — purely a specification generator.
+"""
 from __future__ import annotations
 
 from typing import Optional

@@ -1,3 +1,11 @@
+"""
+OpenAI LLMClient implementation.
+
+Input:  LLMRequest or chat message list + OpenAI tool schemas.
+Output: LLMResponse (text) or ChatResponse (text + tool_calls).
+Does:   wraps openai.chat.completions.create; implements generate() and chat()
+        from LLMClient base class for use in Stage 4 agent loop and Stages 5/7.
+"""
 from __future__ import annotations
 
 import json

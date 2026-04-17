@@ -1,3 +1,11 @@
+"""
+AgentContext — shared state passed into AgentLoop for Stage 4.
+
+Input:  DataFrame, dataset_preview dict, evidence dict, optional RAG stores.
+Output: dataclass instance accessed by AgentLoop and all statistical tools.
+Does:   bundles the dataset and pre-computed evidence so tools can query the
+        DataFrame without reloading it, and the LLM has structured context.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

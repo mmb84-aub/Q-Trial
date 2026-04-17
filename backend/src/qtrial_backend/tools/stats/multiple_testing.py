@@ -1,8 +1,16 @@
+"""
+Multiple testing correction tool — Stage 4 statistical tool.
+
+Input:  list of raw p-values + correction method (bonferroni|holm|fdr_bh|fdr_by).
+Output: MultipleTestingResult with adjusted p-values, rejection flags, and FWER/FDR.
+Does:   applies family-wise error rate (FWER) or false discovery rate (FDR)
+        corrections when the agent has run multiple simultaneous hypothesis tests,
+        per ICH E9 guidelines for clinical trial analysis.
+"""
 from __future__ import annotations
 
 import numpy as np
 from pydantic import BaseModel, Field
-
 from qtrial_backend.agent.context import AgentContext
 from qtrial_backend.tools.registry import tool
 

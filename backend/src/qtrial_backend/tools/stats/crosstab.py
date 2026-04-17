@@ -1,3 +1,12 @@
+"""
+Cross-tabulation tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + row_col + col_col + optional value_col for aggregation.
+Output: CrosstabResult with contingency table, row/column percentages,
+        and chi-squared test statistic + p-value.
+Does:   produces frequency or aggregated cross-tabulations between two
+        categorical variables, with optional chi-squared independence test.
+"""
 from __future__ import annotations
 
 import numpy as np

@@ -1,3 +1,12 @@
+"""
+Dataset preview builder — Stage 3 (pure Python).
+
+Input:  pandas DataFrame.
+Output: dict with keys: n_rows, n_cols, columns (list of column descriptors
+        with name, dtype, n_missing, n_unique, sample_values).
+Does:   produces a lightweight structural snapshot of the dataset injected into
+        every LLM prompt so the model understands schema without raw data.
+"""
 from __future__ import annotations
 
 import pandas as pd

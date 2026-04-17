@@ -1,3 +1,13 @@
+"""
+Automatic statistical test selector — Stage 4 statistical tool.
+
+Input:  AgentContext + outcome_col + group_col + optional covariates.
+Output: TestSelectionResult with recommended test name, rationale, normality
+        check outcome, sample sizes per group, and a ranked alternative list.
+Does:   applies decision-tree logic (normality, sample size, variable type,
+        number of groups) to recommend the most appropriate test, reducing
+        the risk of the LLM agent choosing an inappropriate method.
+"""
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

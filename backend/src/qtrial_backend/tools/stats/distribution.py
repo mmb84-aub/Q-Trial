@@ -1,3 +1,12 @@
+"""
+Distribution fitting tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + column name + optional candidate distributions list.
+Output: DistributionResult with best-fit distribution name, parameters,
+        goodness-of-fit statistics (KS test, AIC), and histogram bin counts.
+Does:   fits parametric distributions to a numeric column and ranks them
+        by AIC so the agent can reason about the data-generating process.
+"""
 from __future__ import annotations
 
 import math

@@ -1,3 +1,12 @@
+"""
+Group-by aggregation tool — Stage 4 statistical tool.
+
+Input:  AgentContext + group_col(s) + agg_col + aggregation function
+        (mean|median|std|count|sum|min|max).
+Output: GroupByResult with per-group aggregated values and group sizes.
+Does:   computes stratified summaries so the agent can compare outcomes
+        across treatment arms, sites, or any categorical grouping variable.
+"""
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

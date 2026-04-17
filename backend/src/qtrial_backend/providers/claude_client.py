@@ -1,3 +1,11 @@
+"""
+Anthropic Claude LLMClient implementation.
+
+Input:  LLMRequest or chat message list + Claude tool schemas.
+Output: LLMResponse (text) or ChatResponse (text + tool_calls).
+Does:   wraps anthropic.messages.create (max_tokens=8192); groups consecutive
+        tool_result messages into one user turn as required by the Claude API.
+"""
 from __future__ import annotations
 
 import json

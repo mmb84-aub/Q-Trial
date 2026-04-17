@@ -1,3 +1,12 @@
+"""
+Google Gemini LLMClient implementation.
+
+Input:  LLMRequest or chat message list + Gemini tool schemas.
+Output: LLMResponse (text) or ChatResponse (text + tool_calls).
+Does:   wraps google.genai generate_content with GenerateContentConfig; groups
+        consecutive function_response parts into one user turn; supports API
+        key rotation and exponential-backoff retry on rate-limit errors.
+"""
 from __future__ import annotations
 
 import json

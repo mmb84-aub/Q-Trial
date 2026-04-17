@@ -1,3 +1,12 @@
+"""
+Effect size computation tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + outcome_col + group_col (binary treatment indicator).
+Output: EffectSizeResult with Cohen's d, Hedges' g, odds ratio, risk ratio,
+        95% CIs, and clinical significance flags.
+Does:   computes standardised effect sizes and ratio measures so the LLM agent
+        can distinguish statistically significant but clinically trivial effects.
+"""
 from __future__ import annotations
 
 import itertools

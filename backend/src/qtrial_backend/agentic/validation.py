@@ -1,3 +1,13 @@
+"""
+Synthesis output validator — Stage 7 (pure Python).
+
+Input:  SynthesisOutput Pydantic model + list[GroundedFinding].
+Output: validated SynthesisOutput, or raises ValidationError with a retry
+        prompt string for the caller to use in a second LLM call.
+Does:   checks required fields are non-empty, citation aliases are valid,
+        and grounded findings cross-reference correctly; used by orchestrator.py
+        after the single synthesis LLM call.
+"""
 from __future__ import annotations
 
 import re

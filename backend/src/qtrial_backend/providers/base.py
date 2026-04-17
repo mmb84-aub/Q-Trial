@@ -1,3 +1,11 @@
+"""
+LLMClient abstract base class.
+
+Input:  LLMRequest (prompt, system, model) or chat message list + tools.
+Output: LLMResponse (text) or ChatResponse (text + optional tool_calls list).
+Does:   defines the interface all provider clients must implement — generate()
+        for single-turn completions and chat() for the multi-turn agent loop.
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

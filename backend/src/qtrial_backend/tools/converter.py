@@ -1,3 +1,14 @@
+"""
+Tool schema converter — translates RegisteredTool objects to provider formats.
+
+Input:  list[RegisteredTool] from ToolRegistry.
+Output: provider-specific tool schema lists:
+          to_openai_tools()  → list[dict] for OpenAI / OpenRouter
+          to_claude_tools()  → list[dict] for Anthropic Claude
+          to_gemini_tools()  → list for Google Gemini
+Does:   each provider has a slightly different function-calling schema format;
+        this module isolates those differences so AgentLoop stays provider-agnostic.
+"""
 from __future__ import annotations
 
 from typing import Any

@@ -1,8 +1,15 @@
+"""
+Row sampling tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + n or fraction + optional stratify_col + random_seed.
+Output: SampleResult with sampled DataFrame rows and sampling metadata.
+Does:   draws simple random or stratified samples for the LLM agent to
+        inspect raw records without loading the full dataset into context.
+"""
 from __future__ import annotations
 
 import pandas as pd
 from pydantic import BaseModel, Field
-
 from qtrial_backend.agent.context import AgentContext
 from qtrial_backend.tools.registry import tool
 

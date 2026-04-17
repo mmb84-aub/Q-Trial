@@ -1,8 +1,16 @@
+"""
+Descriptive column statistics — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + column name(s).
+Output: ColumnStatsResult with count, mean, std, min, max, percentiles,
+        n_missing, n_unique for numeric columns; frequency table for categoricals.
+Does:   produces per-column summary statistics as the LLM agent's first
+        step when profiling any column of interest.
+"""
 from __future__ import annotations
 
 import pandas as pd
 from pydantic import BaseModel, Field
-
 from qtrial_backend.agent.context import AgentContext
 from qtrial_backend.tools.registry import tool
 

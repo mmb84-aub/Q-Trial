@@ -1,3 +1,13 @@
+"""
+Tool registry — central store of all callable statistical and literature tools.
+
+Input:  Python functions decorated with @register_tool or added via
+        ToolRegistry.register(); converter functions produce provider schemas.
+Output: ToolRegistry singleton exposing get_all_tools() → list[RegisteredTool].
+Does:   wraps each tool function with its JSON schema so AgentLoop can pass
+        tool definitions to any LLM provider and route tool_call responses back
+        to the correct Python function.
+"""
 from __future__ import annotations
 
 import json

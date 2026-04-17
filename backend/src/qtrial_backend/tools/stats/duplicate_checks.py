@@ -1,3 +1,12 @@
+"""
+Duplicate detection tool — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + optional subset of columns to check.
+Output: DuplicateCheckResult with total duplicate row count, duplicate rate,
+        and sample duplicate rows grouped by key columns.
+Does:   identifies exact and near-duplicate records that could inflate
+        sample size estimates or bias statistical tests.
+"""
 from __future__ import annotations
 
 from typing import Optional

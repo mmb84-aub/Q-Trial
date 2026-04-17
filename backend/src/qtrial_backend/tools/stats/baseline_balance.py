@@ -1,3 +1,12 @@
+"""
+Baseline balance checker — Stage 4 statistical tool.
+
+Input:  pd.DataFrame + treatment_col + list of covariate columns.
+Output: BaselineBalanceResult with standardised mean differences (SMD) per
+        covariate and balance flags (|SMD| > 0.1).
+Does:   verifies treatment arms are balanced at baseline; flags confounders
+        that should be included in any adjusted analysis.
+"""
 from __future__ import annotations
 
 import numpy as np
