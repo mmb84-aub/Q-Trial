@@ -384,7 +384,7 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
         p_val = res.get("p_value")
         if p_val is None:
             return None
-        # Attempt to extract Cohen's d from effect_size result
+        # Extract Cohen's d
         cohen_key = "cohen_d"
         d_val = 0.0
         ci_lo, ci_hi = 0.0, 0.0
@@ -397,13 +397,21 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                 if isinstance(ci_95, (list, tuple)) and len(ci_95) >= 2:
                     ci_lo = float(ci_95[0] or 0.0)
                     ci_hi = float(ci_95[1] or 0.0)
+        # Extract odds ratio for binary endpoints (set when compute_risk_measures=True)
+        odds_ratio: float | None = None
+        if isinstance(es_res, dict):
+            rm = es_res.get("risk_measures", {})
+            if isinstance(rm, dict):
+                or_raw = rm.get("odds_ratio")
+                if or_raw is not None:
+                    odds_ratio = float(or_raw)
         # Estimate n per group
         n_pg = 10
         if isinstance(es_res, dict):
             ga = es_res.get("group_a", {})
             if isinstance(ga, dict):
                 n_pg = max(int(ga.get("n", 10)), 2)
-        return {
+        finding: dict = {
             "finding_id": ep,
             "id": ep,
             "endpoint_type": ep_type,
@@ -414,6 +422,9 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             "n_per_group": n_pg,
             "alpha": alpha,
         }
+        if odds_ratio is not None:
+            finding["odds_ratio"] = odds_ratio
+        return finding
 
     # Continuous results
     cont = primary_analysis.get("continuous_tests", [])
@@ -583,6 +594,7 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             "effect_size_ci": gf.get("effect_size_ci", [0.0, 0.0]),
             "achieved_power": round(float(pwr.get("achieved_power", 0.0)), 4),
             "power_adequate": bool(pwr.get("adequately_powered", False)),
+            "n_required_80pct_power": pwr.get("n_required_80pct_power"),
             "significant_after_correction": bool(
                 not gf.get("gated_out", False)
                 and float(adj_p or 1.0) < alpha
@@ -590,6 +602,8 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
         }
         if "effect_size_note" in gf:
             cf["effect_size_note"] = gf["effect_size_note"]
+        if "odds_ratio" in gf and gf["odds_ratio"] is not None:
+            cf["odds_ratio"] = gf["odds_ratio"]
         corrected_findings.append(cf)
 
     stage_3: dict = {

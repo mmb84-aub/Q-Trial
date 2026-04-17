@@ -880,12 +880,14 @@ def _section_clinical_analysis(result: dict) -> str:
 
     findings = s3.get("corrected_findings", [])
     if findings:
-        header = ["Endpoint", "Type", "Raw p", "Adjusted p", "Method", "Effect size", "95% CI",
-                  "Power", "Significant"]
+        header = ["Endpoint", "Type", "Raw p", "Adjusted p", "Method", "Effect size", "OR",
+                  "95% CI", "Power", "Req. n (80%)", "Significant"]
         rows = []
         for f in findings:
             ci = f.get("effect_size_ci", [0, 0])
             ci_str = f"[{_fmt(ci[0])}, {_fmt(ci[1])}]" if isinstance(ci, list) and len(ci) >= 2 else "—"
+            or_val = f.get("odds_ratio")
+            req_n = f.get("n_required_80pct_power")
             rows.append([
                 f.get("finding_id", "?"),
                 f.get("endpoint_type", "?"),
@@ -893,8 +895,10 @@ def _section_clinical_analysis(result: dict) -> str:
                 _fmt(f.get("adjusted_p_value")),
                 f.get("correction_method", "?"),
                 _fmt(f.get("effect_size")),
+                _fmt(or_val) if or_val is not None else "—",
                 ci_str,
                 _fmt(f.get("achieved_power")),
+                str(int(req_n)) if req_n is not None else "—",
                 "✓" if f.get("significant_after_correction") else "✗",
             ])
         lines.append(_md_table(header, rows))

@@ -15,8 +15,6 @@ Limitation: Uses compound-symmetry (random-intercept) covariance structure
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
@@ -26,7 +24,7 @@ def _clda_logic(
     outcome_col: str,
     time_col: str,
     treatment_col: str,
-    subject_col: Optional[str] = None,
+    subject_col: str | None = None,
 ) -> dict:
     """Constrained Longitudinal Data Analysis (cLDA).
 
