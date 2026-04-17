@@ -25,6 +25,7 @@ import uuid
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 
 from qtrial_backend.config import settings
 from qtrial_backend.core.types import (
@@ -190,7 +191,14 @@ class BedrockClient(LLMClient):
             region_name=region,
             profile_name=settings.aws_profile or None,
         )
-        self._client = session.client("bedrock-runtime")
+        self._client = session.client(
+            "bedrock-runtime",
+            config=BotoConfig(
+                read_timeout=300,
+                connect_timeout=10,
+                retries={"max_attempts": 3, "mode": "adaptive"},
+            ),
+        )
         # Priority: constructor arg > thread-local > env/config default
         raw_model = model or get_thread_model() or settings.bedrock_model
         self.model = _resolve_model_id(raw_model, region)

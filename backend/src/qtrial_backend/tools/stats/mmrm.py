@@ -165,6 +165,20 @@ def _mmrm_logic(
     else:
         interpretation = "No interaction term found in model output."
 
+    # Expose a top-level p_value so downstream extraction (e.g. Stage 3 of
+    # run_clinical_analysis) can find it without digging into fixed_effects.
+    # Prefer the treatment×time interaction p; fall back to the first treatment
+    # main-effect p among fixed_effects.
+    top_p: float | None = None
+    if treatment_time_interaction:
+        top_p = treatment_time_interaction.get("p_value")
+    if top_p is None:
+        for fe in fixed_effects:
+            term = fe.get("term", "")
+            if treatment_col.lower() in term.lower() and ":" not in term:
+                top_p = fe.get("p_value")
+                break
+
     return {
         "model": "MMRM (Mixed Model for Repeated Measures)",
         "formula": formula,
@@ -173,6 +187,7 @@ def _mmrm_logic(
         "n_dropped_listwise": n_dropped,
         "fixed_effects": fixed_effects,
         "treatment_time_interaction": treatment_time_interaction,
+        "p_value": top_p,
         "aic": round(aic, 2),
         "bic": round(bic, 2),
         "reml": True,

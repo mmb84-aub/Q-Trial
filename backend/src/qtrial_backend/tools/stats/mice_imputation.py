@@ -142,7 +142,7 @@ def get_imputed_dataframe(df: pd.DataFrame, target_columns: list[str]) -> pd.Dat
         "Multiple Imputation by Chained Equations (MICE) for Missing At Random (MAR) data. "
         "Runs m independent imputations using IterativeImputer, then pools results with "
         "Rubin's Rules to obtain valid pooled estimates and 95% confidence intervals. "
-        "Call this when little_mcar_test classifies missingness as 'MAR or MNAR'. "
+        "Call this when little_mcar_test classifies missingness as 'Not MCAR'. "
         "Returns pooled mean, within/between imputation variances, and 95% CI per column."
     ),
     params_model=MICEParams,

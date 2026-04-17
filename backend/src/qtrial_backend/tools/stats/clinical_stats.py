@@ -117,10 +117,10 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
         )
     if isinstance(mcar_result, dict):
         mcar_inner = mcar_result.get("little_mcar_test", {})
-        if mcar_inner.get("classification") == "MAR or MNAR":
+        if mcar_inner.get("classification") == "Not MCAR":
             integrity_warnings.append(
-                f"Little's MCAR test: {mcar_inner.get('interpretation', '')}. "
-                "MICE imputation recommended."
+                f"Missingness: {mcar_inner.get('interpretation', 'MCAR rejected.')} "
+                f"{mcar_inner.get('recommendation', '')}"
             )
     if isinstance(baseline_balance_result, dict) and baseline_balance_result.get(
         "imbalanced_variables"
@@ -143,7 +143,7 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
     # ──────────────────────────────────────────────────────────────────────
     # STAGE 2 — ANALYSIS
     # ──────────────────────────────────────────────────────────────────────
-    from qtrial_backend.tools.stats.mice_imputation import get_imputed_dataframe
+    from qtrial_backend.tools.stats.mice_imputation import get_imputed_dataframe, _mice_logic
     from qtrial_backend.tools.stats.mmrm import _mmrm_logic
     from qtrial_backend.tools.stats.ancova import _ancova_logic
     from qtrial_backend.tools.stats.subgroup_analysis import _subgroup_logic
@@ -177,10 +177,19 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             mcar_result.get("little_mcar_test", {}).get("missing_columns", [])
         )
 
-    use_imputation = mcar_class == "MAR or MNAR" and bool(missing_cols_for_imputation)
+    use_imputation = mcar_class == "Not MCAR" and bool(missing_cols_for_imputation)
     analysis_df = df
+    mice_pooled_results: dict | None = None
 
     if use_imputation:
+        # Run proper m=5 MICE with Rubin's Rules pooling
+        try:
+            mice_pooled_results = _mice_logic(df, missing_cols_for_imputation, m=5)
+        except Exception as exc:
+            mice_pooled_results = {"error": str(exc)}
+
+        # Also produce one complete imputed DataFrame for downstream model-based
+        # analyses (MMRM, ANCOVA, etc.) that require a full dataset.
         try:
             analysis_df = get_imputed_dataframe(df, missing_cols_for_imputation)
         except Exception as exc:
@@ -202,6 +211,9 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
     primary_analysis: dict = {}
     all_endpoints = primary_endpoints + secondary_endpoints
 
+    # cLDA result placeholder (populated only for longitudinal data)
+    clda_result: dict | None = None
+
     if outcome_type == "longitudinal":
         if time_col and treatment_col and primary_endpoints:
             primary_analysis = _safe(
@@ -213,9 +225,25 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                 subject_col,
                 None,
             )
+
+            # cLDA — complementary to MMRM for longitudinal repeated-measures
+            from qtrial_backend.tools.stats.clda import _clda_logic
+
+            clda_result = _safe(
+                _clda_logic,
+                analysis_df,
+                primary_endpoints[0],
+                time_col,
+                treatment_col,
+                subject_col,
+            )
         else:
             primary_analysis = {
                 "error": "longitudinal outcome requires time_col and primary_endpoints in config"
+            }
+            clda_result = {
+                "skipped": True,
+                "reason": "cLDA requires time_col, treatment_col, and primary_endpoints.",
             }
 
     elif outcome_type == "survival":
@@ -286,6 +314,16 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                 "note": "treatment_col or primary_endpoints not provided; skipped primary analysis"
             }
 
+    # Set cLDA skip reason for non-longitudinal outcome types
+    if clda_result is None:
+        clda_result = {
+            "skipped": True,
+            "reason": (
+                f"cLDA is only applicable for longitudinal repeated-measures data "
+                f"(current outcome_type: {outcome_type})."
+            ),
+        }
+
     # Subgroup analysis
     subgroup_result: dict | None = None
     if subgroup_cols and treatment_col and all_endpoints and group_a and group_b:
@@ -321,8 +359,10 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
 
     stage_2: dict = {
         "imputation_used": use_imputation,
-        "imputation_method": "MICE" if use_imputation else None,
+        "imputation_method": "MICE (m=5, Rubin's Rules)" if use_imputation else None,
+        "mice_pooled_results": mice_pooled_results,
         "primary_analysis": primary_analysis,
+        "clda": clda_result,
         "subgroup_analysis": subgroup_result,
         "ancova": ancova_result,
     }
@@ -344,7 +384,7 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
         p_val = res.get("p_value")
         if p_val is None:
             return None
-        # Attempt to extract Cohen's d from effect_size result
+        # Extract Cohen's d
         cohen_key = "cohen_d"
         d_val = 0.0
         ci_lo, ci_hi = 0.0, 0.0
@@ -352,15 +392,26 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             d_info = es_res[cohen_key]
             if isinstance(d_info, dict):
                 d_val = float(d_info.get("value", 0.0) or 0.0)
-                ci_lo = float(d_info.get("ci_lower", 0.0) or 0.0)
-                ci_hi = float(d_info.get("ci_upper", 0.0) or 0.0)
+                # effect_size tool stores CIs as ci_95: [lo, hi]
+                ci_95 = d_info.get("ci_95")
+                if isinstance(ci_95, (list, tuple)) and len(ci_95) >= 2:
+                    ci_lo = float(ci_95[0] or 0.0)
+                    ci_hi = float(ci_95[1] or 0.0)
+        # Extract odds ratio for binary endpoints (set when compute_risk_measures=True)
+        odds_ratio: float | None = None
+        if isinstance(es_res, dict):
+            rm = es_res.get("risk_measures", {})
+            if isinstance(rm, dict):
+                or_raw = rm.get("odds_ratio")
+                if or_raw is not None:
+                    odds_ratio = float(or_raw)
         # Estimate n per group
         n_pg = 10
         if isinstance(es_res, dict):
             ga = es_res.get("group_a", {})
             if isinstance(ga, dict):
                 n_pg = max(int(ga.get("n", 10)), 2)
-        return {
+        finding: dict = {
             "finding_id": ep,
             "id": ep,
             "endpoint_type": ep_type,
@@ -371,6 +422,9 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             "n_per_group": n_pg,
             "alpha": alpha,
         }
+        if odds_ratio is not None:
+            finding["odds_ratio"] = odds_ratio
+        return finding
 
     # Continuous results
     cont = primary_analysis.get("continuous_tests", [])
@@ -414,6 +468,83 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                 }
             )
 
+    # Longitudinal: extract MMRM and cLDA findings for correction pipeline
+    if outcome_type == "longitudinal":
+        _long_label = primary_endpoints[0] if primary_endpoints else "longitudinal"
+
+        # Cross-sectional Cohen's d as a conservative effect-size approximation for
+        # longitudinal endpoints.  A proper repeated-measures Cohen's d requires the
+        # ICC from the mixed model; this marginal estimate is labelled accordingly.
+        _long_es_value = 0.0
+        _long_es_ci: list = [0.0, 0.0]
+        _long_n_per_group = max(int(len(analysis_df) // 2), 2)
+        if group_a and group_b and treatment_col and primary_endpoints:
+            _es_params = EffectSizeParams(
+                numeric_column=primary_endpoints[0],
+                group_column=treatment_col,
+                group_a=group_a,
+                group_b=group_b,
+            )
+            _long_es_raw = _safe(_effect_size, _es_params, ctx)
+            if isinstance(_long_es_raw, dict) and "cohen_d" in _long_es_raw:
+                _cd = _long_es_raw["cohen_d"]
+                _long_es_value = float(_cd.get("value", 0.0))
+                _long_es_ci = list(_cd.get("ci_95", [0.0, 0.0]))
+                _long_n_per_group = max(
+                    int(_long_es_raw.get("group_a", {}).get("n", len(analysis_df) // 2)), 2
+                )
+
+        # MMRM
+        if isinstance(primary_analysis, dict) and not primary_analysis.get("error"):
+            _mmrm_p = primary_analysis.get("p_value")
+            if _mmrm_p is not None:
+                raw_findings.append(
+                    {
+                        "finding_id": f"{_long_label}_mmrm",
+                        "id": f"{_long_label}_mmrm",
+                        "endpoint_type": "primary",
+                        "p_value": float(_mmrm_p),
+                        "adjusted_p_value": float(_mmrm_p),
+                        "effect_size": _long_es_value,
+                        "effect_size_ci": _long_es_ci,
+                        "effect_size_note": (
+                            "Cross-sectional Cohen's d (marginal approximation; "
+                            "ignores repeated-measures structure)"
+                        ),
+                        "n_per_group": max(
+                            int(primary_analysis.get("n_subjects", 10) / 2), 2
+                        ),
+                        "alpha": alpha,
+                    }
+                )
+        # cLDA
+        if (
+            isinstance(clda_result, dict)
+            and not clda_result.get("error")
+            and not clda_result.get("skipped")
+        ):
+            _clda_p = clda_result.get("p_value")
+            if _clda_p is not None:
+                raw_findings.append(
+                    {
+                        "finding_id": f"{_long_label}_clda",
+                        "id": f"{_long_label}_clda",
+                        "endpoint_type": "primary",
+                        "p_value": float(_clda_p),
+                        "adjusted_p_value": float(_clda_p),
+                        "effect_size": _long_es_value,
+                        "effect_size_ci": _long_es_ci,
+                        "effect_size_note": (
+                            "Cross-sectional Cohen's d (marginal approximation; "
+                            "ignores repeated-measures structure)"
+                        ),
+                        "n_per_group": max(
+                            int(clda_result.get("n_subjects", 10) / 2), 2
+                        ),
+                        "alpha": alpha,
+                    }
+                )
+
     # Apply corrections
     primary_finding_ids = [f["id"] for f in raw_findings if f["endpoint_type"] == "primary"]
     secondary_finding_ids = [f["id"] for f in raw_findings if f["endpoint_type"] == "secondary"]
@@ -453,23 +584,27 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
         fid = gf.get("id") or gf.get("finding_id", "")
         pwr = power_map.get(fid, {})
         adj_p = gf.get("hierarchical_adjusted_p") or gf.get("adjusted_p_value", gf.get("p_value", 1.0))
-        corrected_findings.append(
-            {
-                "finding_id": fid,
-                "endpoint_type": gf.get("endpoint_type", "secondary"),
-                "raw_p_value": round(float(gf.get("p_value", 1.0)), 6),
-                "adjusted_p_value": round(float(adj_p or 1.0), 6),
-                "correction_method": gf.get("correction_method", "none"),
-                "effect_size": float(gf.get("effect_size", 0.0)),
-                "effect_size_ci": gf.get("effect_size_ci", [0.0, 0.0]),
-                "achieved_power": round(float(pwr.get("achieved_power", 0.0)), 4),
-                "power_adequate": bool(pwr.get("adequately_powered", False)),
-                "significant_after_correction": bool(
-                    not gf.get("gated_out", False)
-                    and float(adj_p or 1.0) < alpha
-                ),
-            }
-        )
+        cf: dict = {
+            "finding_id": fid,
+            "endpoint_type": gf.get("endpoint_type", "secondary"),
+            "raw_p_value": round(float(gf.get("p_value", 1.0)), 6),
+            "adjusted_p_value": round(float(adj_p or 1.0), 6),
+            "correction_method": gf.get("correction_method", "none"),
+            "effect_size": float(gf.get("effect_size", 0.0)),
+            "effect_size_ci": gf.get("effect_size_ci", [0.0, 0.0]),
+            "achieved_power": round(float(pwr.get("achieved_power", 0.0)), 4),
+            "power_adequate": bool(pwr.get("adequately_powered", False)),
+            "n_required_80pct_power": pwr.get("n_required_80pct_power"),
+            "significant_after_correction": bool(
+                not gf.get("gated_out", False)
+                and float(adj_p or 1.0) < alpha
+            ),
+        }
+        if "effect_size_note" in gf:
+            cf["effect_size_note"] = gf["effect_size_note"]
+        if "odds_ratio" in gf and gf["odds_ratio"] is not None:
+            cf["odds_ratio"] = gf["odds_ratio"]
+        corrected_findings.append(cf)
 
     stage_3: dict = {
         "primary_correction": "Bonferroni",

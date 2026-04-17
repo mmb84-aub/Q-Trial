@@ -732,6 +732,14 @@ class FinalReportSchema(BaseModel):
         default_factory=list,
         description="Column names excluded as treatment group assignments.",
     )
+    clinical_analysis: dict | None = Field(
+        default=None,
+        description=(
+            "Three-stage clinical trial statistical analysis results from "
+            "run_clinical_analysis(). Contains stage_1_integrity, "
+            "stage_2_analysis, stage_3_corrections, and clinical_summary."
+        ),
+    )
 
 
 # ── New schemas: Clinical Search Terms, Evidence Strength, Grounded Findings ──
