@@ -914,10 +914,12 @@ def build_static_report(
     df: pd.DataFrame,
     dataset_name: str,
     emit: Callable | None = None,
-) -> tuple[str, dict | None]:
+) -> tuple[str, str | None, dict | None]:
     """
-    Run the full static analysis pipeline and return a Markdown report string
-    plus the raw three-stage clinical analysis dict (or None if it could not run).
+    Run the full static analysis pipeline and return:
+      1. Markdown report string (evidence-eligible sections only),
+      2. Statistical Methodology chapter (display-only, not finding-eligible),
+      3. Raw three-stage clinical analysis dict (or None).
 
     This function is deterministic — no LLM is involved.
     """
@@ -985,6 +987,7 @@ def build_static_report(
 
     # ── Three-stage clinical trial analysis ───────────────────────────────
     clinical_analysis_result: dict | None = None
+    methodology_chapter: str | None = None
     try:
         from qtrial_backend.tools.stats.clinical_stats import run_clinical_analysis
 
@@ -1007,7 +1010,7 @@ def build_static_report(
             except Exception:
                 pass
 
-        sections += ["", _section_statistical_methodology()]
+        methodology_chapter = _section_statistical_methodology()
         sections += ["", _section_clinical_analysis(clinical_analysis_result)]
     except Exception as exc:
         console.print(f"    [yellow]⚠ Clinical Trial Analysis skipped: {exc}[/yellow]")
@@ -1021,4 +1024,4 @@ def build_static_report(
     ]
 
     console.print(f"  [bold green]✔ Static report complete[/bold green] ({sum(len(s) for s in sections)} chars)")
-    return "\n".join(sections), clinical_analysis_result
+    return "\n".join(sections), methodology_chapter, clinical_analysis_result

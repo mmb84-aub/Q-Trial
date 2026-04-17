@@ -103,8 +103,9 @@ def insights(
         dataset_name = Path(file).stem
         console.print("[bold cyan]► Static Analysis:[/bold cyan] Running deterministic statistical report…")
         clinical_analysis_result: dict | None = None
+        methodology_chapter: str | None = None
         try:
-            static_report, clinical_analysis_result = build_static_report(df, dataset_name)
+            static_report, methodology_chapter, clinical_analysis_result = build_static_report(df, dataset_name)
             console.print(f"  [green]✓ Static report ready[/green] ({len(static_report)} chars)")
         except Exception as exc:
             console.print(f"  [yellow]⚠ Static report skipped: {exc}[/yellow]")
@@ -130,6 +131,7 @@ def insights(
             analysis_report=analysis_report,
             tool_log=tool_log,
             clinical_analysis=clinical_analysis_result,
+            methodology_chapter=methodology_chapter,
         )
 
         fi = report.final_insights

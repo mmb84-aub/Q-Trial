@@ -207,8 +207,12 @@ def run_synthesis_call(
         resp = client.generate(req)
         raw = resp.text.strip().strip("```json").strip("```").strip()
         data = json.loads(raw)
-    except Exception:
-        # Fallback: return minimal valid output
+    except Exception as _synth_exc:
+        # Log the real error so it is visible in the backend terminal.
+        console.print(
+            f"[red]⚠ Synthesis LLM call FAILED (provider={provider}): "
+            f"{type(_synth_exc).__name__}: {_synth_exc}[/red]"
+        )
         return (
             SynthesisOutput(
                 future_trial_hypothesis="Further investigation required.",
@@ -383,6 +387,7 @@ def run_agentic_insights(
     column_dict: dict[str, str] | None = None,
     missingness_disclosures: list[MissingnessDisclosure] | None = None,
     clinical_analysis: dict | None = None,
+    methodology_chapter: str | None = None,
 ) -> FinalReportSchema:
     """
     Run the Q-Trial pipeline as specified in the design document.
@@ -643,7 +648,11 @@ def run_agentic_insights(
         final_insights_after=None,
         judge_before=None,
         judge_after=None,
-        prior_analysis_report=analysis_report,
+        prior_analysis_report=(
+            (analysis_report or "") + "\n\n" + methodology_chapter
+            if methodology_chapter
+            else analysis_report
+        ),
         tool_log=typed_tool_log,
         reasoning_state=None,
         guardrail_report=guardrail_report,

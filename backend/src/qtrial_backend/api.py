@@ -129,8 +129,9 @@ async def run_analysis(
         df = df.drop(columns=excluded_cols)
 
     clinical_analysis_result: dict | None = None
+    methodology_chapter: str | None = None
     try:
-        static_report, clinical_analysis_result = await asyncio.to_thread(build_static_report, df, dataset_name)
+        static_report, methodology_chapter, clinical_analysis_result = await asyncio.to_thread(build_static_report, df, dataset_name)
     except Exception:
         static_report = None
 
@@ -165,6 +166,7 @@ async def run_analysis(
             column_dict,
             list(missingness_disclosures.values()),
             clinical_analysis_result,
+            methodology_chapter,
         )
     except Exception as exc:
         raise HTTPException(
@@ -248,19 +250,24 @@ async def run_analysis_stream(
         try:
             # ── 1. Deterministic static report ───────────────────────────────
             clinical_analysis_result: dict | None = None
+            methodology_chapter: str | None = None
             try:
-                static_report, clinical_analysis_result = build_static_report(df, dataset_name, emit=emit)
+                static_report, methodology_chapter, clinical_analysis_result = build_static_report(df, dataset_name, emit=emit)
             except Exception:
                 static_report = None
 
             if static_report is not None:
+                # Include methodology chapter in the display-only SSE payload
+                _display_static = static_report
+                if methodology_chapter:
+                    _display_static = static_report + "\n\n" + methodology_chapter
                 loop.call_soon_threadsafe(
                     aq.put_nowait,
                     {
                         "type": "stage_complete",
                         "stage": "StaticAnalysis",
                         "message": "Static statistical report ready",
-                        "static_report": static_report,
+                        "static_report": _display_static,
                     },
                 )
 
@@ -272,14 +279,21 @@ async def run_analysis_stream(
                     column_dict=column_dict,
                 )
             except Exception as exc:
-                console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
+                console.print(f"[red]⚠ Statistical agent loop FAILED (provider={provider}): {exc}[/red]")
                 console.print(traceback.format_exc())
                 loop_report, tool_log = None, None
-                # Non-fatal — emit a warning so the frontend can show a toast
-                # without blocking the rest of the pipeline
+                # Emit a provider-labelled error so the frontend toast is unambiguous.
+                # Use type="error" when provider is bedrock so an LLM credential/region
+                # failure is never displayed as a generic non-fatal warning.
+                event_type = "error" if provider == "bedrock" else "warning"
                 loop.call_soon_threadsafe(
                     aq.put_nowait,
-                    {"type": "warning", "message": str(exc)},
+                    {
+                        "type": event_type,
+                        "message": (
+                            f"[{provider.upper()} agent loop failed] {type(exc).__name__}: {exc}"
+                        ),
+                    },
                 )
 
             # ── 3. Combine static + loop report for the reasoning pipeline ───
@@ -293,6 +307,7 @@ async def run_analysis_stream(
                 study_context, column_dict,
                 list(missingness_disclosures.values()),
                 clinical_analysis_result,
+                methodology_chapter,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

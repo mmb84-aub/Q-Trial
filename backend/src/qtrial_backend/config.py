@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Always load backend/.env relative to this file's location so the backend
+# works regardless of which directory uvicorn / the CLI is launched from.
+# config.py lives at  backend/src/qtrial_backend/config.py
+# parents[2]        = backend/
+_ENV_FILE = Path(__file__).parents[2] / ".env"
+load_dotenv(_ENV_FILE)
 
 
 def _parse_keys(raw: str | None) -> list[str]:
