@@ -532,9 +532,14 @@ def _build_clinical_config(
         config["event_col"] = event_col
     config["outcome_type"] = outcome_type
 
-    # Use first 3 numeric non-excluded columns as primary endpoints
-    config["primary_endpoints"] = candidate_endpoints[:3]
-    config["secondary_endpoints"] = candidate_endpoints[3:6]
+    if outcome_type == "survival":
+        # Keep a wider predictor pool for univariate event-association screening.
+        config["primary_endpoints"] = candidate_endpoints[:12]
+        config["secondary_endpoints"] = []
+    else:
+        # Use first 3 numeric non-excluded columns as primary endpoints
+        config["primary_endpoints"] = candidate_endpoints[:3]
+        config["secondary_endpoints"] = candidate_endpoints[3:6]
 
     # Subgroup columns: categorical columns with 2-6 unique values
     subgroup_candidates = [

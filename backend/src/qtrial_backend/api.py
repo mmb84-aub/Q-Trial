@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from rich.console import Console
 
 from qtrial_backend.agentic.orchestrator import run_agentic_insights
+from qtrial_backend.agentic.report_comparison import analyst_report_extension_supported
 from qtrial_backend.agentic.schemas import MetadataInput
 from qtrial_backend.agent.runner import run_statistical_agent_loop
 from qtrial_backend.providers.gemini_client import set_thread_emit
@@ -56,6 +57,55 @@ def _load_column_dict(dataset_name: str) -> dict[str, str] | None:
                 pass
     return None
 
+
+async def _read_dataset_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
+    content = await file.read()
+    fname = file.filename or ""
+    try:
+        if fname.endswith(".xlsx"):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            df = pd.read_csv(io.BytesIO(content))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+    return df, fname
+
+
+async def _read_optional_analyst_report(
+    analyst_report_file: UploadFile | None,
+) -> tuple[str | None, str | None]:
+    if analyst_report_file is None:
+        return None, None
+
+    filename = analyst_report_file.filename or "analyst_report.txt"
+    if not analyst_report_extension_supported(filename, analyst_report_file.content_type):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Unsupported analyst report format. "
+                "Supported formats: .txt, .md, .markdown, .text, .rst, .json, and UTF-8 text/plain uploads."
+            ),
+        )
+
+    raw = await analyst_report_file.read()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Analyst report must be a UTF-8 text file.",
+        ) from exc
+
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="Analyst report file is empty.")
+    if filename.lower().endswith(".json"):
+        try:
+            parsed = json.loads(text)
+            text = json.dumps(parsed, indent=2, ensure_ascii=False)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid analyst report JSON: {exc}") from exc
+    return filename, text
+
 app = FastAPI(
     title="Q-Trial Statistical Reasoning Engine",
     version="0.1.0",
@@ -82,6 +132,10 @@ async def health() -> dict[str, str]:
 @app.post("/api/run")
 async def run_analysis(
     file: UploadFile = File(..., description="CSV or XLSX dataset"),
+    analyst_report_file: UploadFile | None = File(
+        None,
+        description="Optional human analyst report (.txt, .md, .json, UTF-8 text)",
+    ),
     provider: str = Form("gemini", description="openai | gemini | claude"),
     run_judge: bool = Form(False),
     max_rows: int = Form(25),
@@ -97,15 +151,8 @@ async def run_analysis(
     Returns the serialised FinalReportSchema as JSON.
     """
     # ── Read uploaded file ───────────────────────────────────────────────────
-    content = await file.read()
-    fname = file.filename or ""
-    try:
-        if fname.endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content))
-        else:
-            df = pd.read_csv(io.BytesIO(content))
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+    df, fname = await _read_dataset_upload(file)
+    analyst_report_name, analyst_report_text = await _read_optional_analyst_report(analyst_report_file)
 
     # ── Parse optional metadata ──────────────────────────────────────────────
     meta: MetadataInput | None = None
@@ -167,6 +214,8 @@ async def run_analysis(
             list(missingness_disclosures.values()),
             clinical_analysis_result,
             methodology_chapter,
+            analyst_report_text,
+            analyst_report_name,
         )
     except Exception as exc:
         raise HTTPException(
@@ -179,6 +228,10 @@ async def run_analysis(
 @app.post("/api/run/stream")
 async def run_analysis_stream(
     file: UploadFile = File(..., description="CSV or XLSX dataset"),
+    analyst_report_file: UploadFile | None = File(
+        None,
+        description="Optional human analyst report (.txt, .md, .json, UTF-8 text)",
+    ),
     provider: str = Form("gemini", description="openai | gemini | claude | openrouter"),
     model: str | None = Form(None, description="Model override (used for openrouter)"),
     run_judge: bool = Form(False),
@@ -199,15 +252,8 @@ async def run_analysis_stream(
       {"type": "complete",       "data": {<FinalReportSchema>}}
       {"type": "error",          "message": "..."}
     """
-    content = await file.read()
-    fname = file.filename or ""
-    try:
-        if fname.endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content))
-        else:
-            df = pd.read_csv(io.BytesIO(content))
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+    df, fname = await _read_dataset_upload(file)
+    analyst_report_name, analyst_report_text = await _read_optional_analyst_report(analyst_report_file)
 
     meta: MetadataInput | None = None
     if metadata_json:
@@ -308,6 +354,8 @@ async def run_analysis_stream(
                 list(missingness_disclosures.values()),
                 clinical_analysis_result,
                 methodology_chapter,
+                analyst_report_text,
+                analyst_report_name,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

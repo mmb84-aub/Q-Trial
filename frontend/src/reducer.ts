@@ -5,6 +5,7 @@ export const initialState: PipelineState = {
   studyContext: "",
   file: null,
   dictFile: null,
+  analystReportFile: null,
   outcomeColumn: "",
   provider: "gemini",
   model: "",
@@ -29,6 +30,8 @@ export function reducer(state: PipelineState, action: PipelineAction): PipelineS
       return { ...state, file: action.payload };
     case "SET_DICT_FILE":
       return { ...state, dictFile: action.payload };
+    case "SET_ANALYST_REPORT_FILE":
+      return { ...state, analystReportFile: action.payload };
     case "SET_OUTCOME_COLUMN":
       return { ...state, outcomeColumn: action.payload };
     case "SET_PROVIDER":

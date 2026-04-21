@@ -13,6 +13,7 @@ Rules enforced by the LLM prompt:
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from qtrial_backend.agentic.schemas import ClinicalSearchTerm
 from qtrial_backend.core.router import get_client
@@ -40,7 +41,7 @@ Example:
 
 
 def translate_findings_to_cst(
-    findings: list[str],
+    findings: list[str | dict[str, Any]],
     study_context: str,
     provider: ProviderName = "gemini",
     max_terms: int = 10,
@@ -59,16 +60,18 @@ def translate_findings_to_cst(
     client = get_client(provider)
     # Deduplicate and cap
     seen: set[str] = set()
-    deduped: list[str] = []
+    deduped: list[dict[str, str]] = []
     for f in findings:
-        key = f.strip().lower()
+        payload = _coerce_finding_payload(f)
+        key = (payload["plain"] or payload["raw"]).strip().lower()
         if key not in seen:
             seen.add(key)
-            deduped.append(f)
+            deduped.append(payload)
         if len(deduped) >= max_terms:
             break
 
-    def _translate_one(finding: str) -> ClinicalSearchTerm:
+    def _translate_one(payload: dict[str, str]) -> ClinicalSearchTerm:
+        finding = payload["plain"] or payload["raw"]
         user_prompt = (
             f"Study context: {study_context}\n\n"
             f"Statistical finding: {finding}\n\n"
@@ -88,12 +91,22 @@ def translate_findings_to_cst(
                 raise ValueError("Empty term returned")
             return ClinicalSearchTerm(
                 source_finding=finding,
+                source_finding_raw=payload["raw"],
+                source_finding_plain=payload["plain"] or finding,
+                comparison_claim_text=payload.get("comparison_claim_text") or None,
+                finding_category=payload["finding_category"],
+                claim_type=payload["claim_type"],
                 term=term,
                 study_context_used=study_context,
             )
         except Exception as exc:
             return ClinicalSearchTerm(
                 source_finding=finding,
+                source_finding_raw=payload["raw"],
+                source_finding_plain=payload["plain"] or finding,
+                comparison_claim_text=payload.get("comparison_claim_text") or None,
+                finding_category=payload["finding_category"],
+                claim_type=payload["claim_type"],
                 term="",
                 study_context_used=study_context,
                 translation_failed=True,
@@ -111,3 +124,27 @@ def translate_findings_to_cst(
             results[futures[fut]] = fut.result()
 
     return [r for r in results if r is not None]
+
+
+def _coerce_finding_payload(finding: str | dict[str, Any]) -> dict[str, str]:
+    if isinstance(finding, str):
+        return {
+            "raw": finding,
+            "plain": finding,
+            "finding_category": "analytical",
+            "claim_type": "association_claim",
+        }
+    raw = str(finding.get("finding_text_raw") or finding.get("raw") or finding.get("finding_text") or "").strip()
+    plain = str(finding.get("finding_text_plain") or finding.get("plain") or finding.get("finding_text") or raw).strip()
+    comparison_claim = str(
+        finding.get("comparison_claim_text") or finding.get("comparison_claim") or ""
+    ).strip()
+    category = str(finding.get("finding_category") or "analytical").strip() or "analytical"
+    claim_type = str(finding.get("claim_type") or "association_claim").strip() or "association_claim"
+    return {
+        "raw": raw or plain,
+        "plain": plain or raw,
+        "comparison_claim_text": comparison_claim,
+        "finding_category": category,
+        "claim_type": claim_type,
+    }
