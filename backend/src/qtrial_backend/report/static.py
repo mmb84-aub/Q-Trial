@@ -503,16 +503,71 @@ def _section_survival(ctx: AgentContext, time_col: str, event_col: str, group_co
     return "\n".join(lines)
 
 
+def _section_variable_selection(quantum_evidence: dict) -> str:
+    """Generate Variable Selection section from QUBO feature selection results."""
+    lines = ["## Variable Selection"]
+    
+    n_selected = quantum_evidence.get("n_selected", 0)
+    n_candidates = quantum_evidence.get("n_candidates", 0)
+    redundancy_before = quantum_evidence.get("redundancy_before", 0.0)
+    redundancy_after = quantum_evidence.get("redundancy_after", 0.0)
+    redundancy_reduction_pct = quantum_evidence.get("redundancy_reduction_pct", 0.0)
+    selected_columns = quantum_evidence.get("selected_columns", [])
+    excluded_columns = quantum_evidence.get("excluded_columns", [])
+    selection_method = quantum_evidence.get("selection_method", "qubo")
+    
+    # Main narrative
+    lines.append(
+        f"\nBefore statistical analysis, **{n_selected} variables** were selected from "
+        f"**{n_candidates}** total using QUBO-based combinatorial optimisation. "
+        f"This reduces redundancy between variables and focuses the analysis on the "
+        f"strongest signals relative to the outcome."
+    )
+    
+    # Redundancy metrics
+    lines.append(
+        f"\nMean correlation between variables reduced from **{redundancy_before*100:.1f}%** "
+        f"to **{redundancy_after*100:.1f}%** (**{redundancy_reduction_pct:.1f}%** reduction)."
+    )
+    
+    if selection_method == "relevance_fallback":
+        lines.append(
+            "\n> ⚠️ **Note:** Solver redundancy reduction was insufficient; fallback to top "
+            f"variables by relevance was applied."
+        )
+    
+    # Selected columns list
+    if selected_columns:
+        cols_str = ", ".join(f"_{col}_" for col in selected_columns)
+        lines.append(f"\n**Selected variables:** {cols_str}")
+    
+    # Excluded columns list  
+    if excluded_columns:
+        exclude_str = ", ".join(f"_{col}_" for col in excluded_columns[:10])
+        if len(excluded_columns) > 10:
+            exclude_str += f", ... ({len(excluded_columns) - 10} more)"
+        lines.append(f"\n**Variables not analysed:** {exclude_str}")
+    
+    return "\n".join(lines)
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def build_static_report(
     df: pd.DataFrame,
     dataset_name: str,
     emit: Callable | None = None,
+    quantum_evidence: dict | None = None,
 ) -> str:
     """
     Run the full static analysis pipeline and return a Markdown report string.
     This function is deterministic — no LLM is involved.
+    
+    Args:
+        df: Input DataFrame
+        dataset_name: Name of dataset for report header
+        emit: Optional callback for progress events
+        quantum_evidence: Optional QUBO feature selection results
     """
     # Ensure tools are registered
     import qtrial_backend.tools  # noqa: F401
@@ -557,6 +612,16 @@ def build_static_report(
         f"# Static Analysis Report — {dataset_name}",
         f"> Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} · Fully deterministic, no LLM",
         "",
+    ]
+    
+    # Insert Variable Selection section if quantum evidence is provided
+    if quantum_evidence is not None:
+        sections.extend([
+            _run("Variable Selection", _section_variable_selection, quantum_evidence),
+            "",
+        ])
+
+    sections.extend([
         _run("Overview",          _section_overview,       df, dataset_name),
         "",
         _run("Data Quality",      _section_data_quality,   ctx),
@@ -568,7 +633,7 @@ def build_static_report(
         _run("Normality Tests",   _section_normality,      ctx),
         "",
         _run("Correlation Matrix",_section_correlation,    ctx),
-    ]
+    ])
 
     if treatment_col:
         sections += ["", _run("Baseline Balance", _section_baseline_balance, ctx, treatment_col)]

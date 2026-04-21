@@ -118,15 +118,7 @@ async def run_analysis(
                 status_code=422, detail=f"Invalid metadata JSON: {exc}"
             )
 
-    # ── Run static statistical report first (deterministic, no LLM) ─────────
-    dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
-    column_dict = _load_column_dict(dataset_name)
-    try:
-        static_report = await asyncio.to_thread(build_static_report, df, dataset_name)
-    except Exception:
-        static_report = None
-
-    # ── QUBO Feature Selection (before statistical agent) ─────────────────────
+    # ── QUBO Feature Selection (before static report) ──────────────────────────
     # Run quantum-inspired feature selection to reduce dimensionality
     quantum_evidence = None
     selected_df = df
@@ -154,10 +146,18 @@ async def run_analysis(
         quantum_evidence = None
         selected_df = df
 
+    # ── Run static statistical report first (deterministic, no LLM) ─────────
+    dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
+    column_dict = _load_column_dict(dataset_name)
+    try:
+        static_report = await asyncio.to_thread(build_static_report, selected_df, dataset_name, None, quantum_evidence)
+    except Exception:
+        static_report = None
+
     # ── Run LLM-driven statistical agent loop ────────────────────────────────
     try:
         loop_report, tool_log = await asyncio.to_thread(
-            run_statistical_agent_loop, selected_df, provider, dataset_name, None, None, column_dict
+            run_statistical_agent_loop, selected_df, provider, dataset_name, None, None, column_dict, quantum_evidence
         )
     except Exception as exc:
         console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")
@@ -259,24 +259,7 @@ async def run_analysis_stream(
         set_openrouter_model(model if provider == "openrouter" else None)
         set_bedrock_model(model if provider == "bedrock" else None)
         try:
-            # ── 1. Deterministic static report ───────────────────────────────
-            try:
-                static_report = build_static_report(df, dataset_name, emit=emit)
-            except Exception:
-                static_report = None
-
-            if static_report is not None:
-                loop.call_soon_threadsafe(
-                    aq.put_nowait,
-                    {
-                        "type": "stage_complete",
-                        "stage": "StaticAnalysis",
-                        "message": "Static statistical report ready",
-                        "static_report": static_report,
-                    },
-                )
-
-            # ── QUBO Feature Selection (before statistical agent) ─────────────
+            # ── QUBO Feature Selection (before static report) ──────────────────
             quantum_evidence = None
             selected_df = df
             try:
@@ -286,7 +269,7 @@ async def run_analysis_stream(
                 if meta and meta.outcome_column:
                     outcome_column = meta.outcome_column
                 quantum_evidence = run_qubo_feature_selection(
-                    df, profile, outcome_column, 0.5
+                    df, profile, outcome_column, 1.0
                 )
                 selected_df = df[quantum_evidence["selected_columns"]]
                 msg = (
@@ -306,12 +289,30 @@ async def run_analysis_stream(
                 quantum_evidence = None
                 selected_df = df
 
+            # ── 1. Deterministic static report ───────────────────────────────
+            try:
+                static_report = build_static_report(selected_df, dataset_name, emit=emit, quantum_evidence=quantum_evidence)
+            except Exception:
+                static_report = None
+
+            if static_report is not None:
+                loop.call_soon_threadsafe(
+                    aq.put_nowait,
+                    {
+                        "type": "stage_complete",
+                        "stage": "StaticAnalysis",
+                        "message": "Static statistical report ready",
+                        "static_report": static_report,
+                    },
+                )
+
             # ── 2. LLM-driven statistical agent loop ─────────────────────────
             try:
                 loop_report, tool_log = run_statistical_agent_loop(
                     selected_df, provider, dataset_name, emit=emit,
                     model=model if provider in ("openrouter", "bedrock") else None,
                     column_dict=column_dict,
+                    quantum_evidence=quantum_evidence,
                 )
             except Exception as exc:
                 console.print(f"[red]⚠ Statistical agent loop FAILED: {exc}[/red]")

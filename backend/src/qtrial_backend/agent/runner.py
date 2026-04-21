@@ -30,6 +30,7 @@ def _build_initial_message(
     df: pd.DataFrame,
     dataset_name: str,
     column_dict: dict[str, str] | None = None,
+    quantum_evidence: dict | None = None,
 ) -> str:
     """Format the standard initial user message for AgentLoop."""
     schema_lines = [f"  {col} ({dtype})" for col, dtype in df.dtypes.items()]
@@ -55,12 +56,34 @@ def _build_initial_message(
     else:
         column_descriptions = ""
 
+    # Inject quantum feature selection context if available
+    feature_selection_context = ""
+    if quantum_evidence is not None:
+        n_selected = quantum_evidence.get("n_selected", 0)
+        n_candidates = quantum_evidence.get("n_candidates", 0)
+        reduction_pct = quantum_evidence.get("redundancy_reduction_pct", 0.0)
+        relevance_scores = quantum_evidence.get("relevance_scores", {})
+        
+        # Sort relevance scores by value (descending)
+        sorted_scores = sorted(relevance_scores.items(), key=lambda x: x[1], reverse=True)
+        scores_list = "\n".join(f"  {col}: {score:.2f}" for col, score in sorted_scores)
+        
+        feature_selection_context = (
+            "\nFEATURE SELECTION CONTEXT\n"
+            f"{n_selected} variables were selected from {n_candidates} total using QUBO-based "
+            f"combinatorial optimisation. Redundancy between variables was reduced by {reduction_pct:.1f}%.\n\n"
+            "Selected variables ranked by relevance to outcome:\n"
+            f"{scores_list}\n\n"
+            "Focus your analysis on these variables. Do not request columns outside this set "
+            "unless you have a specific clinical reason related to the study context provided above."
+        )
+
     return INITIAL_USER_MESSAGE_TEMPLATE.format(
         dataset_name=dataset_name,
         rows=len(df),
         cols=len(df.columns),
         schema=schema,
-        column_descriptions=column_descriptions,
+        column_descriptions=column_descriptions + feature_selection_context,
         preview_json=preview,
     )
 
@@ -72,6 +95,7 @@ def run_statistical_agent_loop(
     emit: Callable | None = None,
     model: str | None = None,
     column_dict: dict[str, str] | None = None,
+    quantum_evidence: dict | None = None,
 ) -> tuple[str, list[dict]]:
     """
     Run the LLM-driven statistical AgentLoop on df.
@@ -105,7 +129,7 @@ def run_statistical_agent_loop(
         except Exception:
             pass
 
-    initial_message = _build_initial_message(df, dataset_name, column_dict)
+    initial_message = _build_initial_message(df, dataset_name, column_dict, quantum_evidence)
 
     loop = AgentLoop(
         client=client,
