@@ -87,7 +87,10 @@ async def _read_optional_analyst_report(
             ),
         )
 
-    raw = await analyst_report_file.read()
+    _MAX_ANALYST_REPORT_BYTES = 1 * 1024 * 1024  # 1 MB
+    raw = await analyst_report_file.read(_MAX_ANALYST_REPORT_BYTES + 1)
+    if len(raw) > _MAX_ANALYST_REPORT_BYTES:
+        raise HTTPException(status_code=413, detail="Analyst report exceeds the 1 MB size limit.")
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
