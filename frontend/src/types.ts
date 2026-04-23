@@ -22,7 +22,31 @@ export interface LiteratureArticle {
 
 export interface GroundedFinding {
   finding_text: string;
-  grounding_status: "Supported" | "Contradicted" | "Novel";
+  finding_text_raw?: string | null;
+  finding_text_plain?: string | null;
+  comparison_claim_text?: string | null;
+  grounding_status:
+    | "Supported"
+    | "Contradicted"
+    | "Novel"
+    | "Data Quality Note"
+    | "Preprocessing Observation"
+    | "Pipeline Warning"
+    | "QC Observation";
+  finding_category?:
+    | "analytical"
+    | "survival_result"
+    | "endpoint_result"
+    | "data_quality"
+    | "preprocessing"
+    | "pipeline_warning"
+    | "qc_note";
+  claim_type?:
+    | "association_claim"
+    | "descriptive_claim"
+    | "data_quality_claim"
+    | "setup_claim"
+    | "metadata_claim";
   citations: LiteratureArticle[];
   evidence_strength: EvidenceStrengthScore | null;
   novel_statement: string | null;
@@ -31,6 +55,86 @@ export interface GroundedFinding {
   test_selection_rationale: string | null;
   missingness_disclosure: string | null;
   confidence_warning: string | string[] | null;
+}
+
+export interface ComparableFinding {
+  finding_id: string;
+  source: "qtrial" | "human";
+  source_label: string;
+  finding_text: string;
+  normalized_text: string;
+  section: string | null;
+  finding_category?:
+    | "analytical"
+    | "survival_result"
+    | "endpoint_result"
+    | "data_quality"
+    | "preprocessing"
+    | "pipeline_warning"
+    | "qc_note"
+    | null;
+  claim_type?:
+    | "association_claim"
+    | "descriptive_claim"
+    | "data_quality_claim"
+    | "setup_claim"
+    | "metadata_claim"
+    | null;
+  endpoint: string | null;
+  significance: "significant" | "not_significant" | "unclear";
+  p_value: number | null;
+  effect_size: number | null;
+  effect_size_label: string | null;
+  evidence_score: number;
+  evidence_label: string;
+  citations_present: boolean;
+  metadata: Record<string, unknown>;
+}
+
+export interface FindingMatch {
+  qtrial_finding: ComparableFinding;
+  human_finding: ComparableFinding;
+  relation: "agree" | "partial_agree" | "contradict";
+  match_score: number;
+  rationale: string;
+  qtrial_evidence_stronger: boolean;
+  text_used_for_matching?: Record<string, string>;
+}
+
+export interface ComparisonMetrics {
+  total_qtrial_findings: number;
+  total_human_findings: number;
+  matched_pairs: number;
+  qtrial_only_count: number;
+  human_only_count: number;
+  recall_against_human: number;
+  novel_rate: number;
+  agreement_count: number;
+  partial_agreement_count: number;
+  contradiction_count: number;
+  agreement_rate_over_matched: number;
+  contradiction_rate_over_matched: number;
+  evidence_upgrade_rate: number;
+  mcc: number | null;
+  mcc_interpretation: string | null;
+}
+
+export interface HumanReportParseResult {
+  source_name: string;
+  findings: ComparableFinding[];
+  total_candidates: number;
+  discarded_candidates: number;
+}
+
+export interface ComparisonReport {
+  analyst_report_name: string;
+  summary: string;
+  metrics: ComparisonMetrics;
+  matched_findings: FindingMatch[];
+  contradictions: FindingMatch[];
+  qtrial_only_findings: ComparableFinding[];
+  human_only_findings: ComparableFinding[];
+  human_report_parse: HumanReportParseResult | null;
 }
 
 export interface ResearchQuestion {
@@ -101,6 +205,7 @@ export interface FinalReport {
   synthesis_quality_score: SynthesisQualityScore | null;
   treatment_columns_excluded: string[];
   final_insights: InsightSynthesisOutput;
+  comparison_report: ComparisonReport | null;
   // run_id is derived from reproducibility_log if present
   reproducibility_log: { run_id: string } | null;
 }
@@ -122,6 +227,7 @@ export interface PipelineState {
   studyContext: string;
   file: File | null;
   dictFile: File | null;
+  analystReportFile: File | null;
   outcomeColumn: string;
   provider: string;
   model: string;
@@ -138,6 +244,7 @@ export type PipelineAction =
   | { type: "SET_CONTEXT"; payload: string }
   | { type: "SET_FILE"; payload: File }
   | { type: "SET_DICT_FILE"; payload: File | null }
+  | { type: "SET_ANALYST_REPORT_FILE"; payload: File | null }
   | { type: "SET_OUTCOME_COLUMN"; payload: string }
   | { type: "SET_PROVIDER"; payload: { provider: string; model: string } }
   | { type: "START_UPLOAD" }

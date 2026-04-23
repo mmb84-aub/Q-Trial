@@ -33,9 +33,19 @@ import pandas as pd
 from rich.console import Console
 
 from qtrial_backend.agentic.cst_translator import translate_findings_to_cst
+from qtrial_backend.agentic.finding_categories import (
+    classify_claim_type,
+    classify_finding_category,
+    is_analytical_category,
+    neutral_status_for_category,
+)
+from qtrial_backend.agentic.finding_comparison_normalizer import normalize_comparison_claims
+from qtrial_backend.agentic.finding_verbalizer import verbalize_statistical_findings
 from qtrial_backend.agentic.literature_validator import LiteratureValidatorPipeline
+from qtrial_backend.agentic.report_comparison import build_comparison_report
 from qtrial_backend.agentic.reproducibility import ReproducibilityLogBuilder
 from qtrial_backend.agentic.schemas import (
+    ComparisonReport,
     ControlVariable,
     ExcludedColumn,
     FinalReportSchema,
@@ -370,6 +380,23 @@ def _annotate_confidence_warnings(
     return grounded_findings.model_copy(update={"findings": updated_findings})
 
 
+def _build_qc_finding(text: str, category: str) -> GroundedFinding:
+    return GroundedFinding(
+        finding_text=text,
+        finding_text_raw=text,
+        finding_text_plain=text,
+        finding_category=category,  # type: ignore[arg-type]
+        claim_type=classify_claim_type(text, finding_category=category),
+        grounding_status=neutral_status_for_category(category),
+        literature_skipped=True,
+        literature_skip_note=(
+            "This note was excluded from literature grounding because it reflects "
+            "data quality, preprocessing, or pipeline context rather than a "
+            "clinically meaningful analytical result."
+        ),
+    )
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def run_agentic_insights(
@@ -388,6 +415,8 @@ def run_agentic_insights(
     missingness_disclosures: list[MissingnessDisclosure] | None = None,
     clinical_analysis: dict | None = None,
     methodology_chapter: str | None = None,
+    analyst_report_text: str | None = None,
+    analyst_report_name: str | None = None,
 ) -> FinalReportSchema:
     """
     Run the Q-Trial pipeline as specified in the design document.
@@ -466,10 +495,28 @@ def run_agentic_insights(
     # The analysis_report is a Markdown string; we use it directly as the
     # source of findings for translation.
     grounded_findings_list: list[GroundedFinding] = []
+    analytical_grounded_findings: list[GroundedFinding] = []
     grounded_findings_schema: GroundedFindingsSchema | None = None
     synthesis_quality: SynthesisQualityScore | None = None
     synthesis_output: SynthesisOutput | None = None
     narrative_summary: str = ""
+    comparison_report: ComparisonReport | None = None
+
+    corrected_findings = (
+        (clinical_analysis or {}).get("stage_3_corrections", {})
+        if isinstance(clinical_analysis, dict)
+        else {}
+    ).get("corrected_findings", [])
+    if isinstance(corrected_findings, list) and corrected_findings:
+        try:
+            verbalized = verbalize_statistical_findings(corrected_findings, provider)
+            normalized_for_comparison = normalize_comparison_claims(verbalized, provider)
+            clinical_analysis = dict(clinical_analysis or {})
+            stage_3 = dict(clinical_analysis.get("stage_3_corrections", {}))
+            stage_3["corrected_findings"] = normalized_for_comparison
+            clinical_analysis["stage_3_corrections"] = stage_3
+        except Exception as exc:
+            console.print(f"[yellow]⚠ Statistical finding verbalization skipped: {exc}[/yellow]")
 
     if study_context and analysis_report:
         try:
@@ -480,8 +527,43 @@ def run_agentic_insights(
             # and for finding_text shown to clinicians.
             # The tool_log is NOT used as finding text — it contains raw JSON.
             import re as _re
-            findings_for_cst: list[str] = []
-            if analysis_report:
+            findings_for_cst: list[str | dict[str, str]] = []
+            supplemental_qc_findings: list[GroundedFinding] = []
+            seen_qc_texts: set[str] = set()
+
+            corrected_findings = (
+                (clinical_analysis or {}).get("stage_3_corrections", {})
+                if isinstance(clinical_analysis, dict)
+                else {}
+            ).get("corrected_findings", [])
+            if isinstance(corrected_findings, list):
+                for finding in corrected_findings:
+                    if not isinstance(finding, dict):
+                        continue
+                    category = str(finding.get("finding_category") or "analytical")
+                    plain_text = str(finding.get("finding_text_plain") or "").strip()
+                    raw_text = str(finding.get("finding_text_raw") or "").strip()
+                    if not plain_text and not raw_text:
+                        continue
+                    best_text = plain_text or raw_text
+                    if not is_analytical_category(category):
+                        if best_text.lower() not in seen_qc_texts:
+                            seen_qc_texts.add(best_text.lower())
+                            supplemental_qc_findings.append(_build_qc_finding(best_text, category))
+                        continue
+                    findings_for_cst.append(
+                        {
+                            "finding_text_plain": best_text,
+                            "finding_text_raw": raw_text or plain_text,
+                            "comparison_claim_text": str(finding.get("comparison_claim_text") or "").strip() or None,
+                            "finding_category": category,
+                            "claim_type": str(finding.get("claim_type") or "association_claim"),
+                        }
+                    )
+                    if len(findings_for_cst) >= 10:
+                        break
+
+            if analysis_report and len(findings_for_cst) < 10:
                 _stat_pattern = _re.compile(
                     r"(p\s*[=<>]\s*0?\.\d+|p\s*[=<>]\s*\d|"
                     r"\bHR\b|\bOR\b|\bRR\b|\bAUC\b|\bCI\b|"
@@ -498,9 +580,21 @@ def run_agentic_insights(
                     if not s or s.startswith("|") or s.startswith("#") or s.startswith("---") or len(s) < 30:
                         continue
                     if _stat_pattern.search(s):
-                        findings_for_cst.append(s)
-                        if len(findings_for_cst) >= 10:
-                            break
+                        category = classify_finding_category(s)
+                        if is_analytical_category(category):
+                            findings_for_cst.append(
+                                {
+                                    "finding_text_plain": s,
+                                    "finding_text_raw": s,
+                                    "finding_category": category,
+                                    "claim_type": classify_claim_type(s, finding_category=category),
+                                }
+                            )
+                            if len(findings_for_cst) >= 10:
+                                break
+                        elif s.lower() not in seen_qc_texts:
+                            seen_qc_texts.add(s.lower())
+                            supplemental_qc_findings.append(_build_qc_finding(s, category))
 
             csts = translate_findings_to_cst(findings_for_cst, study_context, provider)
             _repro.add_csts(csts)
@@ -510,26 +604,35 @@ def run_agentic_insights(
             # ── Step 6: Literature Validator (API calls) ──────────────────────
             console.print("[bold cyan]► Step 6:[/bold cyan] Literature validation…")
             lit_pipeline = LiteratureValidatorPipeline(provider=provider)
-            grounded_findings_list = lit_pipeline.validate(csts)
+            analytical_grounded_findings = lit_pipeline.validate(csts)
+            grounded_findings_list = analytical_grounded_findings + supplemental_qc_findings
             _repro.add_literature_queries(lit_pipeline.query_records)
             _emit(
                 "stage_complete",
                 "literature_validation",
-                f"Literature: {len(grounded_findings_list)} findings grounded",
+                (
+                    f"Literature: {len(analytical_grounded_findings)} analytical findings grounded; "
+                    f"{len(supplemental_qc_findings)} QC notes separated"
+                ),
             )
-            n_supported = sum(1 for g in grounded_findings_list if g.grounding_status == "Supported")
-            n_novel = sum(1 for g in grounded_findings_list if g.grounding_status == "Novel")
+            n_supported = sum(1 for g in analytical_grounded_findings if g.grounding_status == "Supported")
+            n_novel = sum(1 for g in analytical_grounded_findings if g.grounding_status == "Novel")
             console.print(
                 f"  [green]✓ Literature:[/green] "
                 f"{n_supported} supported, {n_novel} novel, "
-                f"{len(grounded_findings_list) - n_supported - n_novel} contradicted"
+                f"{len(analytical_grounded_findings) - n_supported - n_novel} contradicted"
+                + (
+                    f"; {len(supplemental_qc_findings)} QC note(s) kept separate"
+                    if supplemental_qc_findings
+                    else ""
+                )
             )
 
             # ── Step 7: Synthesis + Self-Scoring (single LLM call) ───────────
             console.print("[bold cyan]► Step 7:[/bold cyan] Synthesis…")
             synthesis_output, narrative_summary = run_synthesis_call(
                 analysis_report=analysis_report,
-                grounded_findings=grounded_findings_list,
+                grounded_findings=analytical_grounded_findings,
                 study_context=study_context,
                 provider=provider,
             )
@@ -589,9 +692,9 @@ def run_agentic_insights(
     # backward-compat fields that the frontend may still read.
     from qtrial_backend.agentic.schemas import InsightSynthesisOutput, RankedAnalysis, PlanSchema, PlanStep, AgentRunRecord
     _final_insights = InsightSynthesisOutput(
-        key_findings=[gf.finding_text for gf in grounded_findings_list],
+        key_findings=[gf.finding_text for gf in analytical_grounded_findings],
         risks_and_bias_signals=[
-            gf.finding_text for gf in grounded_findings_list
+            gf.finding_text for gf in analytical_grounded_findings
             if gf.grounding_status == "Contradicted"
         ],
         recommended_next_analyses=[
@@ -663,7 +766,24 @@ def run_agentic_insights(
         synthesis_quality_score=synthesis_quality,
         treatment_columns_excluded=detect_treatment_columns(df),
         clinical_analysis=clinical_analysis,
+        comparison_report=None,
     )
+
+    if analyst_report_text and analyst_report_name:
+        try:
+            report = report.model_copy(
+                update={
+                    "comparison_report": build_comparison_report(
+                        final_report=report,
+                        analyst_report_name=analyst_report_name,
+                        analyst_report_text=analyst_report_text,
+                        provider=provider,
+                    )
+                }
+            )
+            _emit("stage_complete", "comparison", "Automated report comparison complete")
+        except Exception as exc:
+            console.print(f"[yellow]⚠ Comparison skipped: {exc}[/yellow]")
 
     report_dict = report.model_dump()
     if typed_tool_log is not None:

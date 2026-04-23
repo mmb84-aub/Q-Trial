@@ -5,6 +5,7 @@ import { FindingsList } from "./FindingsList";
 import { ExcludedColumnsSection } from "./ExcludedColumnsSection";
 import { QuestionBank } from "./QuestionBank";
 import { ForwardRecommendations } from "./ForwardRecommendations";
+import { ComparisonSection } from "./ComparisonSection";
 import { PDFExportButton, ReproducibilityLogDownload, ADLViewerButton } from "./ReportActions";
 
 interface Props {
@@ -67,6 +68,8 @@ export function InteractiveReport({ report, onReset }: Props) {
       <NarrativeSummary report={report} />
 
       {gf && <FindingsList findings={gf.findings} />}
+
+      {report.comparison_report && <ComparisonSection comparison={report.comparison_report} />}
 
       {gf?.synthesis && <ForwardRecommendations synthesis={gf.synthesis} />}
 

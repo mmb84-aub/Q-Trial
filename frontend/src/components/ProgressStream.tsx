@@ -12,11 +12,13 @@ const STAGE_INFO: Record<string, { label: string; detail: string }> = {
   literature_validation:{ label: "Literature validation",      detail: "Checking findings against PubMed, Cochrane, and ClinicalTrials.gov." },
   synthesis:            { label: "Synthesis",                  detail: "Producing grounding status, evidence strength, recommendations, and narrative summary." },
   synthesis_scoring:    { label: "Quality check",              detail: "Self-scoring the synthesis — re-running if quality falls below threshold." },
+  comparison:           { label: "Report comparison",          detail: "Matching Q-Trial findings against the uploaded analyst report and calculating agreement metrics." },
 };
 
 interface Props {
   file: File;
   dictFile?: File | null;
+  analystReportFile?: File | null;
   studyContext: string;
   confirmedTreatmentColumns: string[];
   provider?: string;
@@ -25,7 +27,7 @@ interface Props {
   dispatch: React.Dispatch<PipelineAction>;
 }
 
-export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmentColumns, provider = "gemini", model = "", progressMessages, dispatch }: Props) {
+export function ProgressStream({ file, dictFile, analystReportFile, studyContext, confirmedTreatmentColumns, provider = "gemini", model = "", progressMessages, dispatch }: Props) {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
@@ -37,6 +39,7 @@ export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmen
       formData.append("provider", provider);
       if (model) formData.append("model", model);
       if (dictFile) formData.append("dict_file", dictFile);
+      if (analystReportFile) formData.append("analyst_report_file", analystReportFile);
       confirmedTreatmentColumns.forEach((col) => formData.append("confirmed_treatment_columns", col));
 
       let response: Response;
@@ -54,7 +57,14 @@ export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmen
 
       if (!response.ok || !response.body) {
         if (cancelled) return;
-        dispatch({ type: "ERROR", payload: "The analysis server returned an unexpected response." });
+        let detail = "The analysis server returned an unexpected response.";
+        try {
+          const payload = await response.json() as { detail?: string };
+          if (payload.detail) detail = payload.detail;
+        } catch {
+          // keep generic message
+        }
+        dispatch({ type: "ERROR", payload: detail });
         return;
       }
 
@@ -92,7 +102,9 @@ export function ProgressStream({ file, dictFile, studyContext, confirmedTreatmen
     };
   }, []); // intentionally run once on mount
 
-  const allStages = Object.keys(STAGE_INFO);
+  const allStages = Object.keys(STAGE_INFO).filter((stageKey) => (
+    analystReportFile ? true : stageKey !== "comparison"
+  ));
   const doneSet = new Set(progressMessages);
   // The "current" stage is the first one not yet done
   const currentIdx = allStages.findIndex((s) => !doneSet.has(s));

@@ -13,6 +13,7 @@ into a single pipeline that:
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 
@@ -38,13 +39,21 @@ _DEFAULT_DELAYS: dict[str, float] = {
 _GROUNDING_SYSTEM = """\
 You are a clinical evidence reviewer. Given a statistical finding and a list of \
 literature abstracts, decide whether the finding is:
-  - "Supported": at least one abstract corroborates the direction and magnitude.
+  - "Supported": at least one abstract supports the core variable-outcome relationship \
+    or prognostic direction described in the finding.
   - "Contradicted": at least one abstract directly contradicts the finding.
   - "Novel": no abstract addresses the finding.
 
 Return ONLY a JSON object: {"status": "Supported"|"Contradicted"|"Novel", "rationale": "..."}
 No markdown, no extra keys.
 """
+_GROUNDING_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "were", "was", "are", "have", "has",
+    "had", "into", "than", "then", "over", "under", "between", "during", "after", "before",
+    "their", "there", "these", "those", "patients", "patient", "study", "analysis", "trial",
+    "finding", "findings", "significant", "statistically", "associated", "risk", "outcome",
+    "mortality", "survival",
+}
 
 
 def _pubmed_fetch_raw(query: str, max_results: int = 5) -> list[dict]:
@@ -168,9 +177,37 @@ class LiteratureValidatorPipeline:
             status = data.get("status", "Novel")
             if status not in ("Supported", "Contradicted", "Novel"):
                 status = "Novel"
+            if status == "Novel" and self._has_topical_support(finding, articles):
+                return "Supported", "Retrieved literature is topically aligned with the finding."
             return status, data.get("rationale", "")
         except Exception:
+            if self._has_topical_support(finding, articles):
+                return "Supported", "Retrieved literature is topically aligned with the finding."
             return "Novel", "Grounding status could not be determined."
+
+    def _has_topical_support(
+        self,
+        finding: str,
+        articles: list[LiteratureArticle],
+    ) -> bool:
+        finding_tokens = self._support_tokens(finding)
+        if not finding_tokens:
+            return False
+        for article in articles:
+            article_tokens = self._support_tokens(
+                f"{article.title} {article.abstract_snippet}"
+            )
+            shared = finding_tokens & article_tokens
+            if len(shared) >= 2:
+                return True
+        return False
+
+    def _support_tokens(self, text: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", text.lower())
+            if len(token) > 2 and token not in _GROUNDING_STOPWORDS
+        }
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -199,7 +236,12 @@ class LiteratureValidatorPipeline:
         def _fetch_one_cst(cst: ClinicalSearchTerm) -> GroundedFinding:
             if cst.translation_failed:
                 return GroundedFinding(
-                    finding_text=cst.source_finding,
+                    finding_text=cst.source_finding_plain or cst.source_finding,
+                    finding_text_raw=cst.source_finding_raw or cst.source_finding,
+                    finding_text_plain=cst.source_finding_plain or cst.source_finding,
+                    comparison_claim_text=cst.comparison_claim_text,
+                    finding_category=cst.finding_category,
+                    claim_type=cst.claim_type,
                     grounding_status="Novel",
                     literature_skipped=True,
                     literature_skip_note=cst.failure_note,
@@ -254,7 +296,12 @@ class LiteratureValidatorPipeline:
                 )
 
             return GroundedFinding(
-                finding_text=cst.source_finding,
+                finding_text=cst.source_finding_plain or cst.source_finding,
+                finding_text_raw=cst.source_finding_raw or cst.source_finding,
+                finding_text_plain=cst.source_finding_plain or cst.source_finding,
+                comparison_claim_text=cst.comparison_claim_text,
+                finding_category=cst.finding_category,
+                claim_type=cst.claim_type,
                 grounding_status=status,  # type: ignore[arg-type]
                 citations=scored_articles,
                 evidence_strength=best_strength if status != "Novel" else None,

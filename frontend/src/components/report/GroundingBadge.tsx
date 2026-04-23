@@ -5,6 +5,10 @@ const BADGE_STYLES: Record<string, { background: string; color: string }> = {
   Supported:    { background: "#0F6E56", color: "#ffffff" },
   Contradicted: { background: "#A32D2D", color: "#ffffff" },
   Novel:        { background: "#BA7517", color: "#ffffff" },
+  "Data Quality Note": { background: "#475569", color: "#ffffff" },
+  "Preprocessing Observation": { background: "#0f766e", color: "#ffffff" },
+  "Pipeline Warning": { background: "#92400e", color: "#ffffff" },
+  "QC Observation": { background: "#64748b", color: "#ffffff" },
 };
 
 interface Props {

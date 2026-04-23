@@ -11,7 +11,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ──────────────────────────────────────────────────────────────────────────────
@@ -29,6 +28,94 @@ def _make_ctx(df: pd.DataFrame):
     from qtrial_backend.agent.context import AgentContext
 
     return AgentContext(dataframe=df, dataset_name="clinical_analysis")
+
+
+def _canonicalize_endpoint_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    lowered = str(value).strip().lower()
+    if any(token in lowered for token in ("death_event", "mortality", "death")):
+        return "mortality"
+    if "survival" in lowered:
+        return "survival"
+    if "primary_endpoint" in lowered or "primary_outcome" in lowered:
+        return "primary_outcome"
+    return None
+
+
+def _infer_endpoint_from_finding_id(
+    finding_id: str | None,
+    *,
+    endpoint_column: str | None = None,
+) -> str | None:
+    inferred_from_context = _canonicalize_endpoint_name(endpoint_column)
+    if inferred_from_context:
+        return inferred_from_context
+    if not finding_id:
+        return None
+    return _canonicalize_endpoint_name(finding_id)
+
+
+def _infer_direction_from_structured_result(
+    *,
+    effect_size: float | None = None,
+    effect_size_label: str | None = None,
+    odds_ratio: float | None = None,
+) -> str:
+    if odds_ratio is not None:
+        if odds_ratio > 1:
+            return "positive"
+        if odds_ratio < 1:
+            return "negative"
+        return "none"
+
+    if effect_size is not None and effect_size_label in {"correlation", "correlation_coefficient"}:
+        if effect_size > 0:
+            return "positive"
+        if effect_size < 0:
+            return "negative"
+        return "none"
+
+    return "unknown"
+
+
+def _normalized_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    return str(value).strip().lower()
+
+
+def _is_binary_like(series: pd.Series) -> bool:
+    values = series.dropna().unique().tolist()
+    if not values:
+        return False
+    normalized = {str(v).strip().lower() for v in values}
+    return normalized <= {"0", "1", "0.0", "1.0", "false", "true"}
+
+
+def _resolve_survival_event_column(
+    df: pd.DataFrame,
+    *,
+    event_col: str | None,
+    time_col: str | None,
+) -> str | None:
+    if event_col in df.columns and _canonicalize_endpoint_name(event_col) == "mortality":
+        return event_col
+
+    death_like_candidates = [
+        col
+        for col in df.columns
+        if col != time_col
+        and _canonicalize_endpoint_name(col) == "mortality"
+        and _is_binary_like(df[col])
+    ]
+    if death_like_candidates:
+        death_like_candidates.sort(key=lambda col: (str(col).lower() != "death_event", str(col)))
+        return death_like_candidates[0]
+
+    if event_col in df.columns:
+        return event_col
+    return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -247,13 +334,147 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             }
 
     elif outcome_type == "survival":
-        if event_col and time_col:
+        resolved_event_col = _resolve_survival_event_column(
+            analysis_df,
+            event_col=event_col,
+            time_col=time_col,
+        )
+        if resolved_event_col and time_col:
             surv_params = SurvivalParams(
                 time_column=time_col,
-                event_column=event_col,
+                event_column=resolved_event_col,
                 group_column=treatment_col,
             )
             primary_analysis = _safe(_survival, surv_params, ctx)
+            predictor_associations: list[dict] = []
+            predictor_candidates = [
+                c
+                for c in analysis_df.columns
+                if _normalized_name(c)
+                not in {
+                    _normalized_name(time_col),
+                    _normalized_name(resolved_event_col),
+                    _normalized_name(treatment_col),
+                    _normalized_name(subject_col),
+                }
+            ]
+            event_values = analysis_df[resolved_event_col].dropna().astype(str).unique().tolist()
+            if len(event_values) >= 2:
+                group_a_label = "0" if "0" in event_values else str(sorted(event_values)[0])
+                group_b_label = "1" if "1" in event_values else str(sorted(event_values)[-1])
+                for predictor in predictor_candidates:
+                    if predictor not in analysis_df.columns:
+                        continue
+                    predictor_series = analysis_df[predictor]
+                    is_binary_predictor = _is_binary_like(predictor_series)
+                    if is_binary_predictor:
+                        ct_params = CrosstabParams(
+                            row_column=resolved_event_col,
+                            col_column=predictor,
+                        )
+                        ct_res = _safe(_crosstab, ct_params, ctx)
+                        test_info = ct_res.get("significance_test", {}) if isinstance(ct_res, dict) else {}
+                        p_val = test_info.get("p_value")
+                        if p_val is None:
+                            continue
+                        es_params = EffectSizeParams(
+                            numeric_column=predictor,
+                            group_column=resolved_event_col,
+                            group_a=group_a_label,
+                            group_b=group_b_label,
+                            compute_risk_measures=True,
+                        )
+                        es_res = _safe(_effect_size, es_params, ctx)
+                        odds_ratio = None
+                        if isinstance(es_res, dict):
+                            rm = es_res.get("risk_measures", {})
+                            if isinstance(rm, dict) and rm.get("odds_ratio") is not None:
+                                try:
+                                    odds_ratio = float(rm["odds_ratio"])
+                                except (TypeError, ValueError):
+                                    odds_ratio = None
+                        cramers_v = None
+                        if isinstance(test_info, dict) and test_info.get("cramers_v") is not None:
+                            try:
+                                cramers_v = float(test_info["cramers_v"])
+                            except (TypeError, ValueError):
+                                cramers_v = None
+                        predictor_associations.append(
+                            {
+                                "predictor": predictor,
+                                "test_type": "categorical",
+                                "crosstab": ct_res,
+                                "effect_size": es_res,
+                                "p_value": float(p_val),
+                                "effect_value": float(cramers_v or 0.0),
+                                "effect_size_ci": [0.0, 0.0],
+                                "odds_ratio": odds_ratio,
+                                "endpoint_column": resolved_event_col,
+                                "n_per_group": max(int((analysis_df[resolved_event_col].astype(str) == group_a_label).sum()), 2),
+                            }
+                        )
+                        continue
+
+                    if not pd.api.types.is_numeric_dtype(predictor_series):
+                        continue
+                    ht_params = HypothesisTestParams(
+                        numeric_column=predictor,
+                        group_column=resolved_event_col,
+                        group_a=group_a_label,
+                        group_b=group_b_label,
+                        alpha=alpha,
+                    )
+                    ht_res = _safe(_hypothesis_test, ht_params, ctx)
+                    es_params = EffectSizeParams(
+                        numeric_column=predictor,
+                        group_column=resolved_event_col,
+                        group_a=group_a_label,
+                        group_b=group_b_label,
+                    )
+                    es_res = _safe(_effect_size, es_params, ctx)
+                    p_val = ht_res.get("p_value") if isinstance(ht_res, dict) else None
+                    if p_val is None:
+                        continue
+                    d_info = es_res.get("cohen_d", {}) if isinstance(es_res, dict) else {}
+                    oriented_effect = None
+                    if isinstance(d_info, dict) and d_info.get("value") is not None:
+                        try:
+                            oriented_effect = -float(d_info.get("value"))
+                        except (TypeError, ValueError):
+                            oriented_effect = None
+                    n_pg = 10
+                    group_a_info = ht_res.get("group_a", {}) if isinstance(ht_res, dict) else {}
+                    if isinstance(group_a_info, dict):
+                        try:
+                            n_pg = max(int(group_a_info.get("n", 10)), 2)
+                        except (TypeError, ValueError):
+                            n_pg = 10
+                    effect_ci = [0.0, 0.0]
+                    if isinstance(d_info, dict):
+                        ci_95 = d_info.get("ci_95")
+                        if isinstance(ci_95, (list, tuple)) and len(ci_95) >= 2:
+                            try:
+                                effect_ci = [-float(ci_95[1] or 0.0), -float(ci_95[0] or 0.0)]
+                            except (TypeError, ValueError):
+                                effect_ci = [0.0, 0.0]
+                    predictor_associations.append(
+                        {
+                            "predictor": predictor,
+                            "test_type": "numeric",
+                            "hypothesis_test": ht_res,
+                            "effect_size": es_res,
+                            "p_value": float(p_val),
+                            "effect_value": float(oriented_effect or 0.0),
+                            "effect_size_ci": effect_ci,
+                            "endpoint_column": resolved_event_col,
+                            "n_per_group": n_pg,
+                        }
+                    )
+            primary_analysis = {
+                **primary_analysis,
+                "resolved_event_column": resolved_event_col,
+                "predictor_associations": predictor_associations,
+            }
         else:
             primary_analysis = {
                 "error": "survival outcome requires time_col and event_col in config"
@@ -453,12 +674,14 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
     # Survival (single p-value from log-rank)
     if outcome_type == "survival" and isinstance(primary_analysis, dict):
         logrank_p = primary_analysis.get("log_rank_p_value")
+        resolved_event_col = primary_analysis.get("resolved_event_column") or event_col
         if logrank_p is not None:
             raw_findings.append(
                 {
                     "finding_id": "survival_primary",
                     "id": "survival_primary",
                     "endpoint_type": "primary",
+                    "endpoint_column": resolved_event_col,
                     "p_value": float(logrank_p),
                     "adjusted_p_value": float(logrank_p),
                     "effect_size": 0.0,
@@ -467,6 +690,37 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                     "alpha": alpha,
                 }
             )
+        predictor_associations = primary_analysis.get("predictor_associations", [])
+        if isinstance(predictor_associations, list):
+            for item in predictor_associations:
+                predictor = str(item.get("predictor") or "").strip()
+                ht_res = item.get("hypothesis_test", {})
+                if not predictor:
+                    continue
+                p_val = item.get("p_value")
+                if p_val is None and isinstance(ht_res, dict):
+                    p_val = ht_res.get("p_value")
+                if p_val is None:
+                    continue
+                effect_value = item.get("effect_value")
+                effect_ci = item.get("effect_size_ci") or [0.0, 0.0]
+                n_pg = item.get("n_per_group") or 10
+                raw_findings.append(
+                    {
+                        "finding_id": predictor,
+                        "id": predictor,
+                        "endpoint_type": "primary",
+                        "endpoint_column": item.get("endpoint_column") or resolved_event_col,
+                        "p_value": float(p_val),
+                        "adjusted_p_value": float(p_val),
+                        "effect_size": float(effect_value or 0.0),
+                        "effect_size_ci": effect_ci,
+                        "n_per_group": n_pg,
+                        "alpha": alpha,
+                    }
+                )
+                if item.get("odds_ratio") is not None:
+                    raw_findings[-1]["odds_ratio"] = float(item["odds_ratio"])
 
     # Longitudinal: extract MMRM and cLDA findings for correction pipeline
     if outcome_type == "longitudinal":
@@ -583,22 +837,62 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
     for gf in gate_result.get("findings", all_corrected):
         fid = gf.get("id") or gf.get("finding_id", "")
         pwr = power_map.get(fid, {})
-        adj_p = gf.get("hierarchical_adjusted_p") or gf.get("adjusted_p_value", gf.get("p_value", 1.0))
+        adj_p = gf.get("hierarchical_adjusted_p")
+        if adj_p is None:
+            adj_p = gf.get("adjusted_p_value")
+        if adj_p is None:
+            adj_p = gf.get("p_value", 1.0)
+        variable = str(fid).strip() or None
+        endpoint = _infer_endpoint_from_finding_id(
+            variable,
+            endpoint_column=str(gf.get("endpoint_column") or "") or None,
+        )
+        odds_ratio = gf.get("odds_ratio")
+        effect_size = float(gf.get("effect_size", 0.0))
+        significant = bool(
+            not gf.get("gated_out", False)
+            and float(adj_p) < alpha
+        )
+        direction = _infer_direction_from_structured_result(
+            effect_size=effect_size,
+            effect_size_label="effect_size",
+            odds_ratio=float(odds_ratio) if odds_ratio is not None else None,
+        )
+        raw_parts = [variable or "finding"]
+        if gf.get("p_value") is not None:
+            raw_parts.append(f"raw p={round(float(gf.get('p_value', 1.0)), 6)}")
+        raw_parts.append(f"adjusted p={round(float(adj_p), 6)}")
+        raw_parts.append(f"effect size={effect_size}")
+        if odds_ratio is not None:
+            raw_parts.append(f"OR={float(odds_ratio)}")
+        raw_parts.append(
+            "significant after correction" if significant else "not significant after correction"
+        )
+        raw_text = "; ".join(raw_parts)
         cf: dict = {
             "finding_id": fid,
+            "finding_text_raw": raw_text,
+            "finding_text_plain": None,
+            "finding_category": (
+                "survival_result"
+                if endpoint == "survival" or "survival" in str(fid).lower()
+                else "analytical"
+            ),
+            "claim_type": "association_claim",
+            "variable": variable,
+            "endpoint": endpoint,
+            "direction": direction,
+            "analysis_type": "association",
             "endpoint_type": gf.get("endpoint_type", "secondary"),
             "raw_p_value": round(float(gf.get("p_value", 1.0)), 6),
-            "adjusted_p_value": round(float(adj_p or 1.0), 6),
+            "adjusted_p_value": round(float(adj_p), 6),
             "correction_method": gf.get("correction_method", "none"),
-            "effect_size": float(gf.get("effect_size", 0.0)),
+            "effect_size": effect_size,
             "effect_size_ci": gf.get("effect_size_ci", [0.0, 0.0]),
             "achieved_power": round(float(pwr.get("achieved_power", 0.0)), 4),
             "power_adequate": bool(pwr.get("adequately_powered", False)),
             "n_required_80pct_power": pwr.get("n_required_80pct_power"),
-            "significant_after_correction": bool(
-                not gf.get("gated_out", False)
-                and float(adj_p or 1.0) < alpha
-            ),
+            "significant_after_correction": significant,
         }
         if "effect_size_note" in gf:
             cf["effect_size_note"] = gf["effect_size_note"]

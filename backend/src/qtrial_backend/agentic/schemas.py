@@ -13,6 +13,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from qtrial_backend.agentic.finding_categories import ClaimType, FindingCategory, GroundingStatusLabel
+
 
 # ── Planner ───────────────────────────────────────────────────────────────────
 
@@ -749,6 +751,10 @@ class FinalReportSchema(BaseModel):
             "stage_2_analysis, stage_3_corrections, and clinical_summary."
         ),
     )
+    comparison_report: ComparisonReport | None = Field(
+        default=None,
+        description="Optional comparison between Q-Trial findings and an uploaded human analyst report.",
+    )
 
 
 # ── New schemas: Clinical Search Terms, Evidence Strength, Grounded Findings ──
@@ -756,6 +762,11 @@ class FinalReportSchema(BaseModel):
 class ClinicalSearchTerm(BaseModel):
     """A statistical finding translated into a clinically phrased query string."""
     source_finding: str
+    source_finding_raw: str | None = None
+    source_finding_plain: str | None = None
+    comparison_claim_text: str | None = None
+    finding_category: FindingCategory = "analytical"
+    claim_type: ClaimType = "association_claim"
     term: str
     study_context_used: str
     translation_failed: bool = False
@@ -775,7 +786,12 @@ class EvidenceStrengthScore(BaseModel):
 class GroundedFinding(BaseModel):
     """A single statistical finding with literature grounding and disclosure metadata."""
     finding_text: str
-    grounding_status: Literal["Supported", "Contradicted", "Novel"]
+    finding_text_raw: str | None = None
+    finding_text_plain: str | None = None
+    comparison_claim_text: str | None = None
+    grounding_status: GroundingStatusLabel
+    finding_category: FindingCategory = "analytical"
+    claim_type: ClaimType = "association_claim"
     citations: list[LiteratureArticle] = Field(default_factory=list)
     evidence_strength: EvidenceStrengthScore | None = None
     novel_statement: str | None = None
@@ -845,6 +861,80 @@ class GroundedFindingsSchema(BaseModel):
     listwise_deletion_columns: list[ListwiseDeletionColumn] = Field(default_factory=list)
 
 
+# ── Report comparison schemas ────────────────────────────────────────────────
+
+class ComparableFinding(BaseModel):
+    finding_id: str
+    source: Literal["qtrial", "human"]
+    source_label: str
+    finding_text: str
+    normalized_text: str
+    section: str | None = None
+    finding_category: FindingCategory | None = None
+    claim_type: ClaimType | None = None
+    variable: str | None = None
+    endpoint: str | None = None
+    direction: Literal["positive", "negative", "none", "unknown"] = "unknown"
+    significant: bool | None = None
+    significance: Literal["significant", "not_significant", "unclear"] = "unclear"
+    p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    evidence_score: float = 0.0
+    evidence_label: str = ""
+    citations_present: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class FindingMatch(BaseModel):
+    qtrial_finding: ComparableFinding
+    human_finding: ComparableFinding
+    relation: Literal["agree", "partial_agree", "contradict"]
+    match_score: float = Field(..., ge=0.0, le=1.0)
+    rationale: str = ""
+    qtrial_evidence_stronger: bool = False
+    matched_by: Literal["variable", "variable+endpoint", "lexical_fallback"] = "lexical_fallback"
+    variable_detected: bool = False
+    endpoint_detected: bool = False
+    text_used_for_matching: dict[str, str] = Field(default_factory=dict)
+
+
+class ComparisonMetrics(BaseModel):
+    total_qtrial_findings: int = 0
+    total_human_findings: int = 0
+    matched_pairs: int = 0
+    qtrial_only_count: int = 0
+    human_only_count: int = 0
+    recall_against_human: float = 0.0
+    novel_rate: float = 0.0
+    agreement_count: int = 0
+    partial_agreement_count: int = 0
+    contradiction_count: int = 0
+    agreement_rate_over_matched: float = 0.0
+    contradiction_rate_over_matched: float = 0.0
+    evidence_upgrade_rate: float = 0.0
+    mcc: float | None = None
+    mcc_interpretation: str | None = None
+
+
+class HumanReportParseResult(BaseModel):
+    source_name: str
+    findings: list[ComparableFinding] = Field(default_factory=list)
+    total_candidates: int = 0
+    discarded_candidates: int = 0
+
+
+class ComparisonReport(BaseModel):
+    analyst_report_name: str
+    summary: str
+    metrics: ComparisonMetrics
+    matched_findings: list[FindingMatch] = Field(default_factory=list)
+    contradictions: list[FindingMatch] = Field(default_factory=list)
+    qtrial_only_findings: list[ComparableFinding] = Field(default_factory=list)
+    human_only_findings: list[ComparableFinding] = Field(default_factory=list)
+    human_report_parse: HumanReportParseResult | None = None
+
+
 # ── New schemas: Synthesis Quality, Reproducibility Log ──────────────────────
 
 class SynthesisQualityScore(BaseModel):
@@ -881,3 +971,6 @@ class ReproducibilityLog(BaseModel):
     clinical_search_terms: list[ClinicalSearchTerm] = Field(default_factory=list)
     tool_call_log: list[ToolCallRecord] = Field(default_factory=list)
     synthesis_quality_score: SynthesisQualityScore | None = None
+
+
+FinalReportSchema.model_rebuild()
