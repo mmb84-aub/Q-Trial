@@ -26,6 +26,8 @@ python-multipart = ">=0.0.9"
 boto3 = "^1.42.73"
 lifelines = "^0.30.3"
 statsmodels = "^0.14.6"
+dwave-neal = "^0.6.0"
+dwave-samplers = "^1.7.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0.0"

@@ -6,6 +6,7 @@ import { ExcludedColumnsSection } from "./ExcludedColumnsSection";
 import { QuestionBank } from "./QuestionBank";
 import { ForwardRecommendations } from "./ForwardRecommendations";
 import { ComparisonSection } from "./ComparisonSection";
+import { StatisticalVerificationSection } from "./StatisticalVerificationSection";
 import { PDFExportButton, ReproducibilityLogDownload, ADLViewerButton } from "./ReportActions";
 
 interface Props {
@@ -68,6 +69,10 @@ export function InteractiveReport({ report, onReset }: Props) {
       <NarrativeSummary report={report} />
 
       {gf && <FindingsList findings={gf.findings} />}
+
+      {report.statistical_verification_report && (
+        <StatisticalVerificationSection verification={report.statistical_verification_report} />
+      )}
 
       {report.comparison_report && <ComparisonSection comparison={report.comparison_report} />}
 

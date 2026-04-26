@@ -76,6 +76,13 @@ def _infer_direction_from_structured_result(
             return "negative"
         return "none"
 
+    if effect_size is not None and effect_size_label == "effect_size":
+        if effect_size > 0:
+            return "positive"
+        if effect_size < 0:
+            return "negative"
+        return "none"
+
     return "unknown"
 
 
@@ -673,7 +680,10 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
 
     # Survival (single p-value from log-rank)
     if outcome_type == "survival" and isinstance(primary_analysis, dict):
-        logrank_p = primary_analysis.get("log_rank_p_value")
+        logrank_p = primary_analysis.get("logrank_p_value")
+        if logrank_p is None:
+            # Backward compatibility for older persisted/intermediate payloads.
+            logrank_p = primary_analysis.get("log_rank_p_value")
         resolved_event_col = primary_analysis.get("resolved_event_column") or event_col
         if logrank_p is not None:
             raw_findings.append(

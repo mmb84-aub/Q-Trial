@@ -62,7 +62,7 @@ def verbalize_statistical_findings(
             "finding_id": str(f.get("finding_id", "")),
             "variable": f.get("variable"),
             "endpoint": f.get("endpoint"),
-            "significant": f.get("significant"),
+            "significant": f.get("significant_after_correction", f.get("significant")),
             "p_value": f.get("adjusted_p_value", f.get("raw_p_value")),
             "direction": f.get("direction", "unknown"),
             "analysis_type": f.get("analysis_type", "association"),
@@ -125,7 +125,7 @@ def _validate_sentence(sentence: str, finding: dict[str, Any]) -> str | None:
     if not endpoint and any(word in lowered for word in _ENDPOINT_WORDS):
         return None
 
-    significant = finding.get("significant")
+    significant = finding.get("significant_after_correction", finding.get("significant"))
     if significant is False and ("significant" in lowered and "not" not in lowered and "did not" not in lowered):
         return None
     if significant is True and ("did not show" in lowered or "not significant" in lowered):
@@ -142,7 +142,7 @@ def _sentence_count(text: str) -> int:
 def _fallback_sentence(finding: dict[str, Any]) -> str:
     subject = _humanize_variable(str(finding.get("variable") or "This variable"))
     outcome = _endpoint_phrase(finding.get("endpoint"))
-    significant = finding.get("significant")
+    significant = finding.get("significant_after_correction", finding.get("significant"))
     if significant is False:
         return f"{subject} did not show a statistically significant association with {outcome}."
     if significant is True:

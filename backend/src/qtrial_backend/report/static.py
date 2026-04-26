@@ -1037,7 +1037,7 @@ def build_static_report(
         _run("Normality Tests",   _section_normality,      ctx),
         "",
         _run("Correlation Matrix",_section_correlation,    ctx),
-    ]
+    ])
 
     if treatment_col:
         sections += ["", _run("Baseline Balance", _section_baseline_balance, ctx, treatment_col)]

@@ -150,6 +150,36 @@ def test_serum_creatinine_generates_corrected_finding_for_survival_outcome() -> 
     assert serum_finding.get("endpoint") == "mortality"
 
 
+def test_survival_logrank_p_value_is_harvested_into_corrected_findings() -> None:
+    df = pd.DataFrame(
+        {
+            "time": [5, 8, 12, 16, 20, 24, 28, 32],
+            "DEATH_EVENT": [1, 1, 1, 1, 0, 0, 0, 0],
+            "trt": ["A", "A", "A", "A", "B", "B", "B", "B"],
+        }
+    )
+    result = run_clinical_analysis(
+        df,
+        {
+            "time_col": "time",
+            "event_col": "DEATH_EVENT",
+            "treatment_col": "trt",
+            "outcome_type": "survival",
+            "alpha": 0.05,
+        },
+    )
+
+    primary_analysis = result.get("stage_2_analysis", {}).get("primary_analysis", {})
+    assert primary_analysis.get("logrank_p_value") is not None
+
+    findings = result.get("stage_3_corrections", {}).get("corrected_findings", [])
+    survival_finding = next((f for f in findings if f.get("finding_id") == "survival_primary"), None)
+
+    assert survival_finding is not None
+    assert survival_finding.get("raw_p_value") == primary_analysis.get("logrank_p_value")
+    assert survival_finding.get("finding_category") == "survival_result"
+
+
 def test_survival_predictors_are_marked_significant_and_event_is_not_a_predictor() -> None:
     df = pd.DataFrame(
         {
