@@ -37,12 +37,13 @@ from qtrial_backend.agentic.finding_categories import (
     classify_claim_type,
     classify_finding_category,
     is_analytical_category,
+    is_methodology_instruction_text,
     neutral_status_for_category,
 )
 from qtrial_backend.agentic.finding_comparison_normalizer import normalize_comparison_claims
 from qtrial_backend.agentic.finding_verbalizer import verbalize_statistical_findings
 from qtrial_backend.agentic.literature_validator import LiteratureValidatorPipeline
-from qtrial_backend.agentic.report_comparison import build_comparison_report
+from qtrial_backend.agentic.report_comparison import build_comparison_report, normalize_qtrial_findings
 from qtrial_backend.agentic.reproducibility import ReproducibilityLogBuilder
 from qtrial_backend.agentic.schemas import (
     ComparisonReport,
@@ -63,6 +64,7 @@ from qtrial_backend.agentic.schemas import (
     ToolCallRecord,
     UnknownsOutput,
 )
+from qtrial_backend.agentic.statistical_verification import build_statistical_verification_report
 from qtrial_backend.agentic.validation import build_retry_prompt, validate_synthesis_output
 from qtrial_backend.core.router import get_client
 from qtrial_backend.core.types import LLMRequest, ProviderName
@@ -501,6 +503,7 @@ def run_agentic_insights(
     synthesis_output: SynthesisOutput | None = None
     narrative_summary: str = ""
     comparison_report: ComparisonReport | None = None
+    statistical_verification_report = None
 
     corrected_findings = (
         (clinical_analysis or {}).get("stage_3_corrections", {})
@@ -578,6 +581,8 @@ def run_agentic_insights(
                 for sentence in _re.split(r"(?<=[.!?])\s+|\n", analysis_report):
                     s = sentence.strip()
                     if not s or s.startswith("|") or s.startswith("#") or s.startswith("---") or len(s) < 30:
+                        continue
+                    if is_methodology_instruction_text(s):
                         continue
                     if _stat_pattern.search(s):
                         category = classify_finding_category(s)
@@ -766,10 +771,27 @@ def run_agentic_insights(
         synthesis_quality_score=synthesis_quality,
         treatment_columns_excluded=detect_treatment_columns(df),
         clinical_analysis=clinical_analysis,
+        statistical_verification_report=statistical_verification_report,
         comparison_report=None,
     )
 
     if analyst_report_text and analyst_report_name:
+        try:
+            report = report.model_copy(
+                update={
+                    "statistical_verification_report": build_statistical_verification_report(
+                        df=df,
+                        qtrial_findings=normalize_qtrial_findings(report),
+                        analyst_report_text=analyst_report_text,
+                        analyst_report_name=analyst_report_name,
+                        metadata=metadata,
+                        column_dict=column_dict,
+                    )
+                }
+            )
+        except Exception as exc:
+            console.print(f"[yellow]⚠ Statistical verification skipped: {exc}[/yellow]")
+
         try:
             report = report.model_copy(
                 update={

@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from qtrial_backend import api
@@ -115,6 +117,7 @@ def test_run_analysis_keeps_analyst_report_optional(monkeypatch) -> None:
     assert response.status_code == 200
     assert captured["analyst_report_text"] is None
     assert captured["analyst_report_name"] is None
+    assert payload["statistical_verification_report"] is None
     assert payload["comparison_report"] is None
 
 
@@ -157,6 +160,52 @@ def test_run_analysis_accepts_utf8_plain_text_even_with_unlisted_extension(monke
     assert response.status_code == 200
     assert captured["analyst_report_name"] == "report.log"
     assert payload["comparison_report"]["analyst_report_name"] == "report.log"
+
+
+def test_run_analysis_preserves_statistical_metadata_json(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run_agentic_insights(*args, **kwargs):
+        captured["metadata"] = args[5]
+        return _make_report()
+
+    monkeypatch.setattr(api, "build_static_report", lambda *args, **kwargs: ("static", None, None))
+    monkeypatch.setattr(api, "run_statistical_agent_loop", lambda *args, **kwargs: ("loop", []))
+    monkeypatch.setattr(api, "run_agentic_insights", _run_agentic_insights)
+
+    client = TestClient(api.app)
+    response = client.post(
+        "/api/run",
+        data={
+            "study_context": "Test study",
+            "metadata_json": json.dumps(
+                {
+                    "primary_endpoint": "DEATH_EVENT",
+                    "time_column": "followup_time",
+                    "event_column": "status",
+                    "event_codes": [2],
+                    "group_column": "allocation",
+                    "status_mapping": {"0": "censored", "2": "death"},
+                }
+            ),
+        },
+        files={
+            "file": (
+                "dataset.csv",
+                b"allocation,followup_time,status,DEATH_EVENT\n0,1,0,0\n1,2,2,1\n",
+                "text/csv",
+            )
+        },
+    )
+
+    metadata = captured["metadata"]
+    assert response.status_code == 200
+    assert metadata.primary_endpoint == "DEATH_EVENT"
+    assert metadata.time_column == "followup_time"
+    assert metadata.event_column == "status"
+    assert metadata.event_codes == [2]
+    assert metadata.group_column == "allocation"
+    assert metadata.status_mapping == {"0": "censored", "2": "death"}
 
 
 def test_run_analysis_stream_passes_supported_analyst_report_through(monkeypatch) -> None:

@@ -117,6 +117,12 @@ _QC_NOTE_PATTERNS = (
     "treatment effect",
 )
 
+_METHODOLOGY_INSTRUCTION_PATTERNS = (
+    r"^(?:please\s+)?(?:perform|run|conduct|use|apply)\b.*\b(?:analysis|regression|curve|curves|model|models|test|tests)\b",
+    r"^(?:please\s+)?(?:perform|run|conduct|use|apply)\b.*\b(?:kaplan[- ]meier|cox regression|cox proportional hazards|log-rank)\b",
+    r"^(?:survival analysis|kaplan[- ]meier(?: curves?)?|cox regression|cox proportional hazards regression)\b(?:\s*[:(,-]|\s+with\b|\s+including\b)",
+)
+
 _ANALYTICAL_PATTERNS = (
     "associated",
     "association",
@@ -187,6 +193,11 @@ def is_comparison_claim_type(claim_type: str | None) -> bool:
     return (claim_type or "association_claim") in COMPARISON_INCLUDED_CLAIM_TYPES
 
 
+def is_methodology_instruction_text(text: str) -> bool:
+    lowered = " ".join((text or "").lower().split())
+    return any(re.search(pattern, lowered) for pattern in _METHODOLOGY_INSTRUCTION_PATTERNS)
+
+
 def classify_finding_category(
     text: str,
     *,
@@ -202,6 +213,8 @@ def classify_finding_category(
         return "data_quality"
     if any(pattern in lowered for pattern in _PIPELINE_WARNING_PATTERNS):
         return "pipeline_warning"
+    if is_methodology_instruction_text(lowered):
+        return "qc_note"
     if any(pattern in lowered for pattern in _QC_NOTE_PATTERNS):
         return "qc_note"
 

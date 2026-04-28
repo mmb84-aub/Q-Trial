@@ -1,4 +1,4 @@
-﻿"""
+"""
 QUBO-based Feature Selection Module
 
 Implements quantum-inspired feature selection using Quadratic Unconstrained Binary 
@@ -11,9 +11,7 @@ Literature references:
 """
 
 import logging
-import time
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import numpy as np
 import pandas as pd
@@ -21,9 +19,6 @@ from scipy import stats
 import neal
 
 logger = logging.getLogger(__name__)
-
-# Timeout configuration (in seconds)
-DEFAULT_QUBO_TIMEOUT = 60  # Maximum time for entire QUBO selection process
 
 
 def compute_relevance_scores(
@@ -269,7 +264,6 @@ def solve_qubo(
     Q: dict,
     num_reads: int = 1000,
     num_sweeps: int = 1000,
-    timeout_seconds: float = 30.0,
 ) -> dict:
     """
     Step 4: Solve QUBO using simulated annealing with diversity optimization.
@@ -283,46 +277,28 @@ def solve_qubo(
         Q: QUBO matrix dict
         num_reads: Number of independent annealing attempts (default 1000, increased for diversity)
         num_sweeps: Length of each annealing schedule (default 1000, increased for quality)
-        timeout_seconds: Maximum time allowed for solving (default 30 seconds)
     
     Returns:
         Dict mapping variable index to binary value (0 or 1)
-    
-    Raises:
-        TimeoutError: If solving takes longer than timeout_seconds
     """
     sampler = neal.SimulatedAnnealingSampler()
     
-    start_time = time.time()
+    # Increased settings for better exploration and optimization
+    response = sampler.sample_qubo(
+        Q, 
+        num_reads=num_reads,           # 2000 independent runs
+        num_sweeps=num_sweeps,         # 2000 iterations each
+        beta_range=(0.01, 5.0),        # Very wide temperature range for thorough exploration
+        seed=None                      # Allow randomness for diversity (try multiple attempts)
+    )
     
-    try:
-        # Increased settings for better exploration and optimization
-        response = sampler.sample_qubo(
-            Q, 
-            num_reads=num_reads,           # 2000 independent runs
-            num_sweeps=num_sweeps,         # 2000 iterations each
-            beta_range=(0.01, 5.0),        # Very wide temperature range for thorough exploration
-            seed=None                      # Allow randomness for diversity (try multiple attempts)
-        )
-        
-        elapsed = time.time() - start_time
-        if elapsed > timeout_seconds:
-            logger.warning(f"QUBO solver exceeded timeout ({elapsed:.1f}s > {timeout_seconds:.1f}s)")
-        
-        # Get the lowest-energy solution (best optimization result)
-        best_sample = response.first.sample
-        lowest_energy = response.first.energy
-        
-        logger.debug(f"QUBO solver: best energy={lowest_energy:.6f}, n_selected={sum(best_sample.values())}, elapsed={elapsed:.2f}s")
-        
-        return best_sample
+    # Get the lowest-energy solution (best optimization result)
+    best_sample = response.first.sample
+    lowest_energy = response.first.energy
     
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(f"QUBO solver failed after {elapsed:.2f}s: {e}")
-        # Return empty solution (no features selected) as fallback
-        return {}
-
+    logger.debug(f"QUBO solver: best energy={lowest_energy:.6f}, n_selected={sum(best_sample.values())}")
+    
+    return best_sample
 
 
 def apply_hard_constraints(
@@ -427,20 +403,17 @@ def run_qubo_feature_selection(
     profile: dict,
     outcome_column: Optional[str] = None,
     lambda_penalty: float = 1.0,
-    timeout_seconds: float = DEFAULT_QUBO_TIMEOUT,
 ) -> dict:
     """
     Step 7: Main orchestration function for QUBO feature selection.
     
     Runs the complete feature selection pipeline and returns a structured output dict.
-    If the process exceeds timeout_seconds, falls back to greedy diversity selection.
     
     Args:
         df: Sanitised DataFrame with candidate columns
         profile: Static profile object from profiler
         outcome_column: Name of outcome column (optional)
         lambda_penalty: Penalty weight for redundancy (default 0.8 for stronger redundancy reduction)
-        timeout_seconds: Maximum seconds to spend on QUBO optimization (default 60)
     
     Returns:
         Dict with keys:
@@ -456,181 +429,123 @@ def run_qubo_feature_selection(
         - lambda_penalty: Penalty weight used
         - num_reads: Number of reads used
         - num_sweeps: Number of sweeps used
-        - selection_method: "qubo", "greedy_diversity", or "error_fallback"
+        - selection_method: "qubo" or "relevance_fallback"
         - outcome_column: Name of outcome column or None
-        - notes: Any warnings or info messages
     """
-    start_time = time.time()
-    notes = []
+    # Identify candidate columns (all numeric columns, excluding outcome)
+    excluded = [outcome_column] if outcome_column else []
+    candidate_columns = [c for c in df.columns if c not in excluded and pd.api.types.is_numeric_dtype(df[c].dtype)]
     
-    try:
-        # Identify candidate columns (all numeric columns, excluding outcome)
-        excluded = [outcome_column] if outcome_column else []
-        candidate_columns = [c for c in df.columns if c not in excluded and pd.api.types.is_numeric_dtype(df[c].dtype)]
+    if not candidate_columns:
+        logger.warning("No numeric candidate columns found. Returning empty selection.")
+        return {
+            "selected_columns": [outcome_column] if outcome_column else [],
+            "excluded_columns": list(df.columns),
+            "relevance_scores": {},
+            "redundancy_before": 0.0,
+            "redundancy_after": 0.0,
+            "redundancy_reduction": 0.0,
+            "n_candidates": 0,
+            "n_selected": 1 if outcome_column else 0,
+            "solver": "simulated_annealing",
+            "lambda_penalty": lambda_penalty,
+            "num_reads": 1000,
+            "num_sweeps": 1000,
+            "selection_method": "relevance_fallback",
+            "outcome_column": outcome_column,
+        }
+    
+    # Step 1: Compute relevance scores
+    relevance_scores = compute_relevance_scores(df, outcome_column, candidate_columns)
+    
+    # Step 2: Compute redundancy matrix
+    redundancy_matrix = compute_redundancy_matrix(df, candidate_columns)
+    
+    # Step 6: Measure redundancy before
+    numeric_candidates = [c for c in candidate_columns if pd.api.types.is_numeric_dtype(df[c].dtype)]
+    redundancy_before = mean_pairwise_correlation(df, numeric_candidates)
+    
+    # Step 3: Construct QUBO matrix
+    Q = construct_qubo_matrix(relevance_scores, redundancy_matrix, candidate_columns, lambda_penalty)
+    
+    # Step 4: Solve QUBO with multiple attempts to find best redundancy reduction
+    # Since simulated annealing is stochastic, we run it 3 times and pick the best result
+    best_result = None
+    best_reduction = -float('inf')
+    
+    for attempt in range(3):
+        best_sample = solve_qubo(Q, num_reads=2000, num_sweeps=2000)
+        selected_indices = [i for i, val in best_sample.items() if val == 1]
         
-        if not candidate_columns:
-            logger.warning("No numeric candidate columns found. Returning empty selection.")
-            return {
-                "selected_columns": [outcome_column] if outcome_column else [],
-                "excluded_columns": list(df.columns),
-                "relevance_scores": {},
-                "redundancy_before": 0.0,
-                "redundancy_after": 0.0,
-                "redundancy_reduction": 0.0,
-                "redundancy_reduction_pct": 0.0,
-                "n_candidates": 0,
-                "n_selected": 1 if outcome_column else 0,
-                "solver": "simulated_annealing",
-                "lambda_penalty": lambda_penalty,
-                "num_reads": 1000,
-                "num_sweeps": 1000,
-                "selection_method": "error_fallback",
-                "outcome_column": outcome_column,
-                "notes": ["No numeric columns found"],
+        # Apply hard constraints to get candidate selection
+        candidate_selected = apply_hard_constraints(
+            selected_indices,
+            candidate_columns,
+            relevance_scores,
+            outcome_column=outcome_column,
+        )
+        
+        # Check redundancy reduction for this attempt
+        numeric_candidate_selected = [c for c in candidate_selected if pd.api.types.is_numeric_dtype(df[c].dtype)]
+        temp_redundancy_after = mean_pairwise_correlation(df, numeric_candidate_selected)
+        temp_reduction = (redundancy_before - temp_redundancy_after) / redundancy_before if redundancy_before > 0 else 0.0
+        
+        # Keep track of the best result
+        if temp_reduction > best_reduction:
+            best_reduction = temp_reduction
+            best_result = {
+                'sample': best_sample,
+                'selected_columns': candidate_selected,
+                'redundancy_after': temp_redundancy_after,
+                'reduction': temp_reduction
             }
         
-        # Step 1: Compute relevance scores
-        try:
-            relevance_scores = compute_relevance_scores(df, outcome_column, candidate_columns)
-        except Exception as e:
-            logger.error(f"Failed to compute relevance scores: {e}")
-            notes.append(f"Relevance computation failed: {e}")
-            return _fallback_selection(df, outcome_column, notes)
+        logger.debug(f"QUBO attempt {attempt + 1}/3: reduction={temp_reduction:.4f}")
+    
+    # Use the best result found
+    selected_columns = best_result['selected_columns']
+    redundancy_after = best_result['redundancy_after']
+    qubo_reduction = best_result['reduction']
+    
+    # Fallback to greedy diversity selection if QUBO achieves <15% reduction
+    # OR if selection is empty
+    target_reduction = 0.15  # 15% per Skolik et al. 2021
+    if len(selected_columns) == 0 or qubo_reduction < target_reduction:
+        logger.warning(f"QUBO reduction {qubo_reduction:.4f} below 15% target. Using greedy diversity selection.")
+        selection_method = "greedy_diversity"
         
-        # Step 2: Compute redundancy matrix
-        try:
-            redundancy_matrix = compute_redundancy_matrix(df, candidate_columns)
-        except Exception as e:
-            logger.error(f"Failed to compute redundancy matrix: {e}")
-            notes.append(f"Redundancy computation failed: {e}")
-            return _fallback_selection(df, outcome_column, notes)
+        # Enforce inclusion of bilirubin if present (top predictor in PBC dataset)
+        must_include = ['bili'] if 'bili' in candidate_columns else []
         
-        # Step 6: Measure redundancy before
-        numeric_candidates = [c for c in candidate_columns if pd.api.types.is_numeric_dtype(df[c].dtype)]
-        try:
-            redundancy_before = mean_pairwise_correlation(df, numeric_candidates)
-        except Exception as e:
-            logger.warning(f"Could not compute initial redundancy: {e}")
-            redundancy_before = 0.0
+        # Use greedy diversity selection
+        target_count = 7  # Target ~7 features as per hard constraints
+        selected_columns = greedy_diversity_selection(
+            df, candidate_columns, relevance_scores, outcome_column, target_count, must_include
+        )
         
-        # Step 3: Construct QUBO matrix
-        try:
-            Q = construct_qubo_matrix(relevance_scores, redundancy_matrix, candidate_columns, lambda_penalty)
-        except Exception as e:
-            logger.error(f"Failed to construct QUBO matrix: {e}")
-            notes.append(f"QUBO construction failed: {e}")
-            return _fallback_selection(df, outcome_column, notes)
-        
-        # Step 4: Solve QUBO with multiple attempts to find best redundancy reduction
-        # Since simulated annealing is stochastic, we run it 3 times and pick the best result
-        best_result = None
-        best_reduction = -float('inf')
-        attempts_completed = 0
-        
-        for attempt in range(3):
-            if time.time() - start_time > timeout_seconds:
-                logger.warning(f"QUBO optimization timeout after {attempts_completed} attempts")
-                notes.append(f"Timeout: only {attempts_completed}/3 attempts completed")
-                break
-            
-            try:
-                best_sample = solve_qubo(Q, num_reads=2000, num_sweeps=2000, timeout_seconds=timeout_seconds - (time.time() - start_time))
-                
-                if not best_sample:
-                    logger.warning(f"QUBO attempt {attempt + 1} returned empty solution")
-                    continue
-                
-                attempts_completed += 1
-                selected_indices = [i for i, val in best_sample.items() if val == 1]
-                
-                # Apply hard constraints to get candidate selection
-                candidate_selected = apply_hard_constraints(
-                    selected_indices,
-                    candidate_columns,
-                    relevance_scores,
-                    outcome_column=outcome_column,
-                )
-                
-                # Check redundancy reduction for this attempt
-                numeric_candidate_selected = [c for c in candidate_selected if pd.api.types.is_numeric_dtype(df[c].dtype)]
-                temp_redundancy_after = mean_pairwise_correlation(df, numeric_candidate_selected)
-                temp_reduction = (redundancy_before - temp_redundancy_after) / redundancy_before if redundancy_before > 0 else 0.0
-                
-                # Keep track of the best result
-                if temp_reduction > best_reduction:
-                    best_reduction = temp_reduction
-                    best_result = {
-                        'sample': best_sample,
-                        'selected_columns': candidate_selected,
-                        'redundancy_after': temp_redundancy_after,
-                        'reduction': temp_reduction
-                    }
-                
-                logger.debug(f"QUBO attempt {attempt + 1}/3: reduction={temp_reduction:.4f}")
-            
-            except Exception as e:
-                logger.warning(f"QUBO attempt {attempt + 1} failed: {e}")
-                continue
-        
-        # If we didn't get any valid attempts, use fallback
-        if best_result is None:
-            logger.warning("No valid QUBO attempts completed. Using greedy diversity fallback.")
-            notes.append("All QUBO attempts failed; using greedy fallback")
-            selection_method = "greedy_diversity"
-            must_include = ['bili'] if 'bili' in candidate_columns else []
-            target_count = 7
-            selected_columns = greedy_diversity_selection(
-                df, candidate_columns, relevance_scores, outcome_column, target_count, must_include
-            )
-            numeric_selected = [c for c in selected_columns if pd.api.types.is_numeric_dtype(df[c].dtype)]
-            redundancy_after = mean_pairwise_correlation(df, numeric_selected)
-        else:
-            # Use the best result found
-            selected_columns = best_result['selected_columns']
-            redundancy_after = best_result['redundancy_after']
-            qubo_reduction = best_result['reduction']
-            
-            # Fallback to greedy diversity selection if QUBO achieves <15% reduction
-            # OR if selection is empty
-            target_reduction = 0.15  # 15% per Skolik et al. 2021
-            if len(selected_columns) == 0 or qubo_reduction < target_reduction:
-                logger.warning(f"QUBO reduction {qubo_reduction:.4f} below 15% target. Using greedy diversity selection.")
-                notes.append(f"QUBO reduction {qubo_reduction:.1%} < 15% target; using greedy fallback")
-                selection_method = "greedy_diversity"
-                
-                # Enforce inclusion of bilirubin if present (top predictor in PBC dataset)
-                must_include = ['bili'] if 'bili' in candidate_columns else []
-                
-                # Use greedy diversity selection
-                target_count = 7  # Target ~7 features as per hard constraints
-                selected_columns = greedy_diversity_selection(
-                    df, candidate_columns, relevance_scores, outcome_column, target_count, must_include
-                )
-                
-                # Recalculate redundancy for greedy selection
-                numeric_selected = [c for c in selected_columns if pd.api.types.is_numeric_dtype(df[c].dtype)]
-                redundancy_after = mean_pairwise_correlation(df, numeric_selected)
-            else:
-                selection_method = "qubo"
-        
-        # Compute reduction ratio (as percentage and fraction)
-        redundancy_reduction_pct = (redundancy_before - redundancy_after) / redundancy_before * 100 if redundancy_before > 0 else 0.0
-        redundancy_reduction = (redundancy_before - redundancy_after) / redundancy_before if redundancy_before > 0 else 0.0
-        
-        # Identify excluded columns
-        excluded_columns = [col for col in df.columns if col not in selected_columns]
-        
-        # Round values for readability
-        redundancy_before = round(redundancy_before, 3)
-        redundancy_after = round(redundancy_after, 3)
-        redundancy_reduction_pct = round(redundancy_reduction_pct, 1)
-        redundancy_reduction = round(redundancy_reduction, 3)
-        
-        # Round relevance scores to 3 decimal places (preserves precision for percentage display)
-        relevance_scores = {col: round(score, 3) for col, score in relevance_scores.items()}
-        
-        elapsed = time.time() - start_time
-        logger.info(f"""
+        # Recalculate redundancy for greedy selection
+        numeric_selected = [c for c in selected_columns if pd.api.types.is_numeric_dtype(df[c].dtype)]
+        redundancy_after = mean_pairwise_correlation(df, numeric_selected)
+    else:
+        selection_method = "qubo"
+    
+    # Compute reduction ratio (as percentage and fraction)
+    redundancy_reduction_pct = (redundancy_before - redundancy_after) / redundancy_before * 100 if redundancy_before > 0 else 0.0
+    redundancy_reduction = (redundancy_before - redundancy_after) / redundancy_before if redundancy_before > 0 else 0.0
+    
+    # Identify excluded columns
+    excluded_columns = [col for col in df.columns if col not in selected_columns]
+    
+    # Round values for readability
+    redundancy_before = round(redundancy_before, 3)
+    redundancy_after = round(redundancy_after, 3)
+    redundancy_reduction_pct = round(redundancy_reduction_pct, 1)
+    redundancy_reduction = round(redundancy_reduction, 3)
+    
+    # Round relevance scores to 3 decimal places (preserves precision for percentage display)
+    relevance_scores = {col: round(score, 3) for col, score in relevance_scores.items()}
+    
+    logger.info(f"""
     ===== QUBO Feature Selection Results =====
     Candidates: {len(candidate_columns)}
     Selected: {len(selected_columns)}
@@ -639,71 +554,24 @@ def run_qubo_feature_selection(
     Reduction: {redundancy_reduction_pct:.1f}%
     Selection method: {selection_method}
     Lambda penalty: {lambda_penalty}
-    Attempts: {attempts_completed}/3
-    Elapsed time: {elapsed:.2f}s
     ==========================================""")
-        
-        return {
-            "selected_columns": selected_columns,
-            "excluded_columns": excluded_columns,
-            "relevance_scores": relevance_scores,
-            "redundancy_before": redundancy_before,
-            "redundancy_after": redundancy_after,
-            "redundancy_reduction": redundancy_reduction,
-            "redundancy_reduction_pct": redundancy_reduction_pct,
-            "n_candidates": len(candidate_columns),
-            "n_selected": len(selected_columns),
-            "solver": "simulated_annealing",
-            "lambda_penalty": lambda_penalty,
-            "num_reads": 2000,
-            "num_sweeps": 2000,
-            "selection_method": selection_method,
-            "outcome_column": outcome_column,
-            "notes": notes,
-        }
-    
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(f"Unexpected error in QUBO feature selection (after {elapsed:.2f}s): {e}", exc_info=True)
-        notes.append(f"Unexpected error: {e}")
-        return _fallback_selection(df, outcome_column, notes)
-
-
-def _fallback_selection(df: pd.DataFrame, outcome_column: Optional[str], notes: list) -> dict:
-    """
-    Fallback selection when all methods fail: return outcome column plus top numeric columns.
-    
-    Args:
-        df: DataFrame
-        outcome_column: Name of outcome column
-        notes: List of notes to include in output
-    
-    Returns:
-        Dict with fallback selection
-    """
-    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c].dtype) and c != outcome_column]
-    fallback_selection = [outcome_column] if outcome_column else []
-    fallback_selection.extend(numeric_cols[:10])  # Limit to 10 numeric columns
-    
-    logger.warning(f"Using fallback selection with {len(fallback_selection)} columns")
     
     return {
-        "selected_columns": fallback_selection,
-        "excluded_columns": [c for c in df.columns if c not in fallback_selection],
-        "relevance_scores": {},
-        "redundancy_before": 0.0,
-        "redundancy_after": 0.0,
-        "redundancy_reduction": 0.0,
-        "redundancy_reduction_pct": 0.0,
-        "n_candidates": len(numeric_cols),
-        "n_selected": len(fallback_selection),
+        "selected_columns": selected_columns,
+        "excluded_columns": excluded_columns,
+        "relevance_scores": relevance_scores,
+        "redundancy_before": redundancy_before,
+        "redundancy_after": redundancy_after,
+        "redundancy_reduction": redundancy_reduction,
+        "redundancy_reduction_pct": redundancy_reduction_pct,
+        "n_candidates": len(candidate_columns),
+        "n_selected": len(selected_columns),
         "solver": "simulated_annealing",
-        "lambda_penalty": 0.0,
-        "num_reads": 0,
-        "num_sweeps": 0,
-        "selection_method": "error_fallback",
+        "lambda_penalty": lambda_penalty,
+        "num_reads": 2000,
+        "num_sweeps": 2000,
+        "selection_method": selection_method,
         "outcome_column": outcome_column,
-        "notes": notes,
     }
 
 
@@ -785,4 +653,3 @@ def greedy_diversity_selection(
         selected = [outcome_column] + selected
     
     return selected
-

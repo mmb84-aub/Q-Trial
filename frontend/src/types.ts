@@ -137,6 +137,41 @@ export interface ComparisonReport {
   human_report_parse: HumanReportParseResult | null;
 }
 
+export interface StatisticalVerificationMetrics {
+  total_claims: number;
+  verified_count: number;
+  contradicted_count: number;
+  partial_count: number;
+  unsupported_count: number;
+  not_verifiable_count: number;
+  verification_rate: number;
+  contradiction_rate: number;
+}
+
+export interface VerifiedClaim {
+  claim_id: string;
+  source_text: string;
+  label: "verified" | "contradicted" | "partial" | "unsupported" | "not_verifiable";
+  variable: string | null;
+  endpoint: string | null;
+  test_used: string | null;
+  recomputed_p_value: number | null;
+  reported_p_value: number | null;
+  effect_size: number | null;
+  effect_size_label: string | null;
+  ci_lower: number | null;
+  ci_upper: number | null;
+  confidence_warnings: string[];
+  rationale: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface StatisticalVerificationReport {
+  summary: string;
+  metrics: StatisticalVerificationMetrics;
+  claims: VerifiedClaim[];
+}
+
 export interface ResearchQuestion {
   question: string;
   source_finding: string;
@@ -205,6 +240,7 @@ export interface FinalReport {
   synthesis_quality_score: SynthesisQualityScore | null;
   treatment_columns_excluded: string[];
   final_insights: InsightSynthesisOutput;
+  statistical_verification_report?: StatisticalVerificationReport | null;
   comparison_report: ComparisonReport | null;
   // run_id is derived from reproducibility_log if present
   reproducibility_log: { run_id: string } | null;

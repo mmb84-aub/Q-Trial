@@ -242,6 +242,22 @@ class MetadataInput(BaseModel):
         default=None,
         description="Confirmed primary endpoint description.",
     )
+    time_column: str | None = Field(
+        default=None,
+        description="Confirmed time-to-event or follow-up time column.",
+    )
+    event_column: str | None = Field(
+        default=None,
+        description="Confirmed event/status endpoint column for survival analysis.",
+    )
+    event_codes: list[int] | None = Field(
+        default=None,
+        description="Codes in the event column that should count as events for survival analysis.",
+    )
+    group_column: str | None = Field(
+        default=None,
+        description="Confirmed grouping column for group comparisons or log-rank tests.",
+    )
     time_unit: str | None = Field(
         default=None,
         description="Unit for time-to-event columns: 'days', 'months', or 'years'.",
@@ -669,6 +685,46 @@ class AgentRunRecord(BaseModel):
     output: dict[str, Any]
 
 
+class StatisticalVerificationMetrics(BaseModel):
+    total_claims: int = 0
+    verified_count: int = 0
+    contradicted_count: int = 0
+    partial_count: int = 0
+    unsupported_count: int = 0
+    not_verifiable_count: int = 0
+    verification_rate: float = 0.0
+    contradiction_rate: float = 0.0
+
+
+class VerifiedClaim(BaseModel):
+    claim_id: str
+    source_text: str
+    label: Literal["verified", "contradicted", "partial", "unsupported", "not_verifiable"]
+    variable: str | None = None
+    endpoint: str | None = None
+    test_used: str | None = None
+    recomputed_p_value: float | None = None
+    reported_p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    reported_effect_size: float | None = None
+    reported_effect_size_label: str | None = None
+    reported_ci_lower: float | None = None
+    reported_ci_upper: float | None = None
+    effect_agreement: Literal["agrees", "conflicts", "partial", "not_assessed"] | None = None
+    confidence_warnings: list[str] = Field(default_factory=list)
+    rationale: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StatisticalVerificationReport(BaseModel):
+    summary: str = ""
+    metrics: StatisticalVerificationMetrics = Field(default_factory=StatisticalVerificationMetrics)
+    claims: list[VerifiedClaim] = Field(default_factory=list)
+
+
 class FinalReportSchema(BaseModel):
     provider: str
     model: str
@@ -750,6 +806,10 @@ class FinalReportSchema(BaseModel):
             "run_clinical_analysis(). Contains stage_1_integrity, "
             "stage_2_analysis, stage_3_corrections, and clinical_summary."
         ),
+    )
+    statistical_verification_report: StatisticalVerificationReport | None = Field(
+        default=None,
+        description="Optional dataset-grounded statistical verification report for extracted claims.",
     )
     comparison_report: ComparisonReport | None = Field(
         default=None,
