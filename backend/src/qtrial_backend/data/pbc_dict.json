@@ -1,0 +1,22 @@
+{
+  "id": "Case number",
+  "time": "Number of days between registration and the earlier of death, transplantation, or study analysis time in July, 1986",
+  "status": "Status: 0=alive, 1=liver transplant, 2=dead",
+  "trt": "Drug: 1=D-penicillamine, 2=placebo",
+  "age": "Age in days",
+  "sex": "Sex: 0=male, 1=female",
+  "ascites": "Presence of ascites: 0=no, 1=yes",
+  "hepato": "Presence of hepatomegaly: 0=no, 1=yes",
+  "spiders": "Presence of spiders: 0=no, 1=yes",
+  "edema": "Presence of edema: 0=no edema and no diuretic therapy for edema; 0.5=edema present without diuretics, or edema resolved by diuretics; 1=edema despite diuretic therapy",
+  "bili": "Serum bilirubin in mg/dl",
+  "chol": "Serum cholesterol in mg/dl",
+  "albumin": "Albumin in gm/dl",
+  "copper": "Urine copper in ug/day",
+  "alk.phos": "Alkaline phosphatase in U/liter",
+  "ast": "SGOT in U/ml",
+  "trig": "Triglycerides in mg/dl",
+  "platelet": "Platelets per cubic ml/1000",
+  "protime": "Prothrombin time in seconds",
+  "stage": "Histologic stage of disease"
+}
