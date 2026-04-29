@@ -561,6 +561,24 @@ def run_agentic_insights(
                             "comparison_claim_text": str(finding.get("comparison_claim_text") or "").strip() or None,
                             "finding_category": category,
                             "claim_type": str(finding.get("claim_type") or "association_claim"),
+                            "variable": finding.get("variable"),
+                            "endpoint": finding.get("endpoint"),
+                            "direction": finding.get("direction") or "unknown",
+                            "direction_label": finding.get("direction_label"),
+                            "significant": finding.get("significant_after_correction", finding.get("significant")),
+                            "significance": (
+                                "significant"
+                                if finding.get("significant_after_correction") is True
+                                else "not_significant"
+                                if finding.get("significant_after_correction") is False
+                                else "unclear"
+                            ),
+                            "p_value": finding.get("adjusted_p_value", finding.get("raw_p_value")),
+                            "effect_size": finding.get("effect_size"),
+                            "effect_size_label": finding.get("effect_size_label"),
+                            "test_type": finding.get("test_type"),
+                            "confidence_warning": finding.get("confidence_warning"),
+                            "metadata": finding.get("metadata") if isinstance(finding.get("metadata"), dict) else {},
                         }
                     )
                     if len(findings_for_cst) >= 10:

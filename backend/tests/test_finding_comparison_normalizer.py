@@ -149,6 +149,28 @@ def test_non_significant_finding_gets_neutral_non_significant_claim(monkeypatch)
     assert findings[0]["comparison_claim_text"] == "Smoking did not show a statistically significant association with mortality."
 
 
+def test_negative_association_claim_type_gets_neutral_non_significant_claim(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "qtrial_backend.agentic.finding_comparison_normalizer.get_client",
+        lambda provider: _FakeClient('{"findings":[]}', {}),
+    )
+    findings = normalize_comparison_claims(
+        [
+            {
+                "finding_id": "diabetes",
+                "claim_type": "negative_association",
+                "variable": "diabetes",
+                "endpoint": "mortality",
+                "significant_after_correction": False,
+                "direction": "unknown",
+                "adjusted_p_value": 0.82,
+            }
+        ],
+        "gemini",
+    )
+    assert findings[0]["comparison_claim_text"] == "Diabetes did not show a statistically significant association with mortality."
+
+
 def test_unknown_direction_stays_neutral(monkeypatch) -> None:
     monkeypatch.setattr(
         "qtrial_backend.agentic.finding_comparison_normalizer.get_client",

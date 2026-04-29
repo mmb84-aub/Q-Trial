@@ -20,6 +20,9 @@ const METRIC_CARDS: Array<{ key: keyof ComparisonReport["metrics"]; label: strin
   { key: "matched_pairs", label: "Matched findings" },
   { key: "qtrial_only_count", label: "Q-Trial only" },
   { key: "human_only_count", label: "Human only" },
+  { key: "precision_against_human", label: "Precision", format: formatPercent },
+  { key: "recall_against_human", label: "Recall", format: formatPercent },
+  { key: "f1_against_human", label: "F1", format: formatPercent },
   { key: "agreement_count", label: "Agreements" },
   { key: "contradiction_count", label: "Contradictions" },
   { key: "evidence_upgrade_rate", label: "Evidence upgrade rate", format: formatPercent },
@@ -71,10 +74,16 @@ export function ComparisonSection({ comparison }: Props) {
           );
         })}
       </div>
-      {comparison.metrics.mcc_interpretation && (
+      {(comparison.metrics.mcc_interpretation || comparison.metrics.mcc_explanation) && (
         <p style={{ marginTop: "-0.75rem", marginBottom: "1.5rem", color: "#4b5563", fontSize: "0.9rem" }}>
-          MCC is computed on matched pairs with explicit binary significance labels; partial agreements are excluded.
-          Interpretation: <strong>{comparison.metrics.mcc_interpretation}</strong>.
+          {comparison.metrics.mcc_interpretation ? (
+            <>
+              MCC is computed on matched pairs with explicit binary significance labels; partial agreements are excluded.
+              Interpretation: <strong>{comparison.metrics.mcc_interpretation}</strong>.
+            </>
+          ) : (
+            <>MCC was not computed: {comparison.metrics.mcc_explanation}</>
+          )}
         </p>
       )}
 
@@ -213,9 +222,15 @@ function FindingPanel({ title, finding }: { title: string; finding: ComparableFi
         {finding.finding_text}
       </div>
       <div style={{ marginTop: "0.45rem", fontSize: "0.82rem", color: "#6b7280", lineHeight: 1.6 }}>
+        {finding.variable && <span>Variable: {displayToken(finding.variable)}. </span>}
         {finding.endpoint && <span>Endpoint: {finding.endpoint}. </span>}
+        {finding.significant !== false && finding.direction !== "unknown" && <span>Direction: {displayDirection(finding.direction)}. </span>}
         {finding.significance !== "unclear" && <span>Significance: {finding.significance.replace("_", " ")}. </span>}
-        {finding.p_value !== null && <span>p={finding.p_value}. </span>}
+        {finding.effect_size !== null && (
+          <span>{displayEffectLabel(finding.effect_size_label)}={formatNumber(finding.effect_size)}. </span>
+        )}
+        {finding.p_value !== null && <span>{formatPLabel(finding.p_value)}. </span>}
+        {finding.finding_category && <span>Category: {displayToken(finding.finding_category)}. </span>}
         <span>Evidence: {finding.evidence_label || "none"}.</span>
       </div>
     </div>
@@ -228,4 +243,46 @@ function formatPercent(value: number): string {
 
 function formatMcc(value: number): string {
   return value.toFixed(2);
+}
+
+function displayDirection(direction: string): string {
+  if (direction === "positive") return "higher variable, higher endpoint";
+  if (direction === "negative") return "higher variable, lower endpoint";
+  if (direction === "none") return "no direction";
+  return direction;
+}
+
+function displayEffectLabel(label: string | null): string {
+  if (!label) return "Effect";
+  const labels: Record<string, string> = {
+    odds_ratio: "OR",
+    hazard_ratio: "HR",
+    risk_ratio: "RR",
+    cramers_v: "Cramer's V",
+    cohen_d: "Cohen's d",
+  };
+  return labels[label.toLowerCase()] ?? displayToken(label);
+}
+
+function displayToken(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function formatP(value: number): string {
+  if (!Number.isFinite(value)) return "N/A";
+  if (value === 0) return "<1e-12";
+  if (value >= 0.9995) return ">0.99";
+  if (Math.abs(value) < 0.001) return value.toExponential(2);
+  return formatNumber(value);
+}
+
+function formatPLabel(value: number): string {
+  const formatted = formatP(value);
+  return formatted.startsWith("<") || formatted.startsWith(">") ? `p ${formatted[0]} ${formatted.slice(1)}` : `p=${formatted}`;
+}
+
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return "N/A";
+  if (value !== 0 && Math.abs(value) < 0.001) return value.toExponential(2);
+  return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
 }

@@ -74,11 +74,29 @@ def test_parse_human_report_uses_current_section_header() -> None:
     assert parsed.findings[1].section == "discussion"
 
 
+def test_report_title_and_variable_heading_are_not_extracted_as_claims() -> None:
+    parsed = parse_human_report_text(
+        "heart_failure.md",
+        """
+        # Clinical Analysis Report: Ejection fraction and mortality
+
+        Results:
+        Ejection fraction and mortality
+        - Lower ejection fraction was associated with higher mortality risk (OR=0.94, p=8e-6).
+        """,
+        known_variables={"ejection_fraction"},
+    )
+
+    assert len(parsed.findings) == 1
+    assert parsed.findings[0].finding_text.startswith("Lower ejection fraction")
+    assert "Clinical Analysis Report" not in parsed.findings[0].finding_text
+
+
 def test_build_comparison_report_handles_empty_human_findings() -> None:
     report = _make_report(
         [
             {
-                "finding_id": "mortality",
+                "finding_id": "age",
                 "adjusted_p_value": 0.01,
                 "effect_size": 0.42,
                 "significant_after_correction": True,
@@ -105,13 +123,15 @@ def test_build_comparison_report_detects_agreement_contradiction_and_evidence_up
     report = _make_report(
         [
             {
-                "finding_id": "mortality",
+                "finding_id": "age",
+                "endpoint": "mortality",
                 "adjusted_p_value": 0.01,
                 "effect_size": 0.42,
                 "significant_after_correction": True,
             },
             {
-                "finding_id": "survival",
+                "finding_id": "smoking",
+                "endpoint": "mortality",
                 "adjusted_p_value": 0.20,
                 "effect_size": 0.11,
                 "significant_after_correction": False,
@@ -124,8 +144,8 @@ def test_build_comparison_report_detects_agreement_contradiction_and_evidence_up
         analyst_report_name="analyst.txt",
         analyst_report_text="""
         Results:
-        - Mortality was statistically significant with p=0.01 [1].
-        - Survival was statistically significant with p=0.02.
+        - Age was statistically significant for mortality with p=0.01 [1].
+        - Smoking was statistically significant for mortality with p=0.02.
         - Albumin increased in the treatment arm.
         """,
         provider="gemini",
@@ -143,7 +163,7 @@ def test_build_comparison_report_detects_agreement_contradiction_and_evidence_up
     assert comparison.metrics.evidence_upgrade_rate == 0.5
     assert {match.relation for match in comparison.matched_findings} == {"agree", "contradict"}
     assert len(comparison.contradictions) == 1
-    assert "human report states that survival predicts survival" in comparison.contradictions[0].rationale.lower() or "did not identify survival as a significant predictor" in comparison.contradictions[0].rationale.lower()
+    assert "smoking" in comparison.contradictions[0].rationale.lower()
 
 
 def test_structured_matching_links_human_claim_to_qtrial_variable() -> None:
@@ -174,7 +194,41 @@ def test_structured_matching_links_human_claim_to_qtrial_variable() -> None:
     assert match.human_finding.endpoint == "mortality"
     assert match.text_used_for_matching["qtrial"]
     assert match.text_used_for_matching["human"] == "Lower ejection fraction predicts mortality."
-    assert "both reports identify ejection fraction" in match.rationale.lower()
+    assert "ejection fraction" in match.rationale.lower()
+
+
+def test_or_below_one_matches_lower_predictor_higher_mortality_claim() -> None:
+    report = _make_report(
+        [
+            {
+                "finding_id": "ejection_fraction",
+                "finding_text_plain": (
+                    "Higher ejection fraction was associated with lower odds of mortality "
+                    "(OR 0.945, p=8e-6), consistent with lower ejection fraction indicating higher mortality risk."
+                ),
+                "endpoint": "mortality",
+                "direction": "negative",
+                "effect_size": 0.945,
+                "effect_size_label": "odds_ratio",
+                "odds_ratio": 0.945,
+                "adjusted_p_value": 0.000008,
+                "significant_after_correction": True,
+            }
+        ]
+    )
+
+    comparison = build_comparison_report(
+        final_report=report,
+        analyst_report_name="analyst.txt",
+        analyst_report_text="Lower ejection fraction was associated with higher mortality risk.",
+        provider="gemini",
+    )
+
+    assert comparison.metrics.matched_pairs == 1
+    match = comparison.matched_findings[0]
+    assert match.relation == "agree"
+    assert match.qtrial_finding.direction == "negative"
+    assert match.human_finding.direction == "negative"
 
 
 def test_structured_matching_detects_significance_contradiction() -> None:
@@ -245,6 +299,47 @@ def test_different_non_significant_variables_do_not_partially_match() -> None:
         final_report=report,
         analyst_report_name="analyst.txt",
         analyst_report_text="Platelet levels did not show a strong relationship with mortality.",
+        provider="gemini",
+    )
+
+    assert comparison.metrics.matched_pairs == 0
+    assert comparison.metrics.qtrial_only_count == 1
+    assert comparison.metrics.human_only_count == 1
+    assert comparison.human_only_findings[0].variable == "platelets"
+    assert "did_not" not in str(comparison.human_only_findings[0].variable)
+
+
+def test_human_claim_variable_normalization_strips_levels_and_verb_fragments() -> None:
+    parsed = parse_human_report_text(
+        "analyst.txt",
+        """
+        Platelet levels did not show a strong relationship with mortality.
+        Serum creatinine levels did not show a statistically significant association with mortality.
+        """,
+    )
+
+    assert [finding.variable for finding in parsed.findings] == ["platelets", "serum_creatinine"]
+    assert all("did_not" not in str(finding.variable) for finding in parsed.findings)
+
+
+def test_same_endpoint_and_significance_variable_mismatch_prevents_match() -> None:
+    report = _make_report(
+        [
+            {
+                "finding_id": "diabetes",
+                "finding_text_plain": "Diabetes was not significantly associated with mortality.",
+                "endpoint": "mortality",
+                "adjusted_p_value": 0.85,
+                "effect_size": 0.01,
+                "significant_after_correction": False,
+            }
+        ]
+    )
+
+    comparison = build_comparison_report(
+        final_report=report,
+        analyst_report_name="analyst.txt",
+        analyst_report_text="Smoking was not significantly associated with mortality.",
         provider="gemini",
     )
 
@@ -452,14 +547,15 @@ def test_serum_creatinine_matches_plain_creatinine_wording() -> None:
     assert comparison.matched_findings[0].human_finding.variable == "serum_creatinine"
 
 
-def test_death_event_normalizes_to_mortality_for_matching() -> None:
+def test_survival_primary_note_does_not_match_clinical_variable_claim() -> None:
     report = _make_report(
         [
             {
                 "finding_id": "survival_primary",
                 "finding_text_plain": "Survival was significantly associated with mortality.",
                 "endpoint": "mortality",
-                "finding_category": "survival_result",
+                "finding_category": "statistical_note",
+                "claim_type": "statistical_note",
                 "adjusted_p_value": 0.01,
                 "effect_size": 0.0,
                 "significant_after_correction": True,
@@ -474,9 +570,10 @@ def test_death_event_normalizes_to_mortality_for_matching() -> None:
         provider="gemini",
     )
 
-    assert comparison.metrics.matched_pairs == 1
-    assert comparison.matched_findings[0].qtrial_finding.endpoint == "mortality"
-    assert comparison.matched_findings[0].human_finding.endpoint in {"mortality", "survival"}
+    assert comparison.metrics.total_qtrial_findings == 0
+    assert comparison.metrics.matched_pairs == 0
+    assert comparison.metrics.total_human_findings == 0
+    assert comparison.metrics.human_only_count == 0
 
 
 def test_duplicate_key_qc_finding_cannot_match_human_mortality_statement() -> None:
@@ -606,6 +703,32 @@ def test_descriptive_and_metadata_human_claims_do_not_match_result_findings() ->
     assert comparison.metrics.qtrial_only_count == 1
 
 
+def test_followup_time_context_is_not_an_analytical_human_claim() -> None:
+    report = _make_report(
+        [
+            {
+                "finding_id": "age",
+                "finding_text_plain": "Age was significantly associated with mortality.",
+                "endpoint": "mortality",
+                "adjusted_p_value": 0.001,
+                "effect_size": 0.4,
+                "significant_after_correction": True,
+            }
+        ]
+    )
+
+    comparison = build_comparison_report(
+        final_report=report,
+        analyst_report_name="analyst.txt",
+        analyst_report_text="Median follow-up time was 18.4 months.",
+        provider="gemini",
+    )
+
+    assert comparison.metrics.total_human_findings == 0
+    assert comparison.metrics.matched_pairs == 0
+    assert comparison.metrics.qtrial_only_count == 1
+
+
 def test_mcc_is_near_perfect_for_perfect_binary_significance_agreement() -> None:
     report = _make_report(
         [
@@ -712,6 +835,8 @@ def test_mcc_returns_null_for_degenerate_case() -> None:
 
     assert comparison.metrics.mcc is None
     assert comparison.metrics.mcc_interpretation is None
+    assert comparison.metrics.mcc_explanation is not None
+    assert "true negatives" in comparison.metrics.mcc_explanation
 
 
 def test_partial_agree_is_excluded_from_mcc() -> None:

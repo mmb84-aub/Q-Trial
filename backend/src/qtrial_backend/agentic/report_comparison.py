@@ -17,8 +17,10 @@ from typing import Any
 from qtrial_backend.agentic.finding_categories import (
     classify_claim_type,
     classify_finding_category,
+    is_endpoint_like_variable,
     is_analytical_category,
     is_comparison_claim_type,
+    is_followup_time_variable,
 )
 from qtrial_backend.agentic.schemas import (
     ComparableFinding,
@@ -43,12 +45,17 @@ _SUPPORTED_ANALYST_REPORT_EXTENSIONS = {
 _FINDING_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n{2,}")
 _BULLET_PREFIX_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
-_P_VALUE_RE = re.compile(r"\bp\s*([=<>])\s*(0?\.\d+|\d+\.\d+|\d+)", re.IGNORECASE)
+_P_VALUE_RE = re.compile(
+    r"\bp\s*([=<>])\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?)",
+    re.IGNORECASE,
+)
+_NUM_RE = r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?)"
 _EFFECT_PATTERNS: list[tuple[str, str]] = [
-    (r"\bHR\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", "hazard_ratio"),
-    (r"\bOR\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", "odds_ratio"),
-    (r"\bRR\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", "risk_ratio"),
-    (r"\bCohen'?s?\s*d\s*[:=]?\s*([-+]?[0-9]+(?:\.[0-9]+)?)", "cohen_d"),
+    (rf"\bHR\s*[:=]?\s*{_NUM_RE}", "hazard_ratio"),
+    (rf"\bOR\s*[:=]?\s*{_NUM_RE}", "odds_ratio"),
+    (rf"\bRR\s*[:=]?\s*{_NUM_RE}", "risk_ratio"),
+    (rf"\bCram[ée]r'?s?\s*V\s*[:=]?\s*{_NUM_RE}", "cramers_v"),
+    (rf"\bCohen'?s?\s*d\s*[:=]?\s*{_NUM_RE}", "cohen_d"),
 ]
 _CITATION_MARKERS = [
     re.compile(r"\[\d+(?:,\s*\d+)*\]"),
@@ -67,6 +74,11 @@ _SECTION_HEADERS = [
     "survival",
     "baseline",
     "analysis",
+    "clinical analysis",
+    "clinical analysis report",
+    "analytical findings",
+    "statistical notes",
+    "data quality notes",
 ]
 _ENDPOINT_ALIASES: dict[str, set[str]] = {
     "mortality": {
@@ -86,10 +98,18 @@ _ENDPOINT_ALIASES: dict[str, set[str]] = {
 }
 _VARIABLE_SYNONYMS: dict[str, set[str]] = {
     "age": {"older age", "older patients", "younger age", "younger patients", "patient age"},
-    "serum_creatinine": {"serum creatinine", "creatinine"},
+    "serum_creatinine": {
+        "serum creatinine",
+        "serum creatinine level",
+        "serum creatinine levels",
+        "creatinine",
+        "creatinine level",
+        "creatinine levels",
+    },
     "ejection_fraction": {"ejection fraction"},
-    "serum_sodium": {"serum sodium", "sodium"},
+    "serum_sodium": {"serum sodium", "serum sodium level", "serum sodium levels", "sodium"},
     "creatinine_phosphokinase": {"cpk", "creatinine phosphokinase"},
+    "platelets": {"platelet", "platelets", "platelet level", "platelet levels"},
     "death_event": {"death event", "mortality", "death during follow up", "death during follow-up"},
 }
 _DIRECTION_HINTS: dict[str, tuple[str, ...]] = {
@@ -254,8 +274,14 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                 section="grounded_findings",
                 finding_category=finding_category,
                 claim_type=claim_type,
-                significance=_significance_from_grounding_status(finding.grounding_status),
-                significant=None,
+                variable=getattr(finding, "variable", None),
+                endpoint=getattr(finding, "endpoint", None),
+                direction=getattr(finding, "direction", "unknown") or "unknown",
+                significance=getattr(finding, "significance", None) or _significance_from_grounding_status(finding.grounding_status),
+                significant=getattr(finding, "significant", None),
+                p_value=getattr(finding, "p_value", None),
+                effect_size=getattr(finding, "effect_size", None),
+                effect_size_label=getattr(finding, "effect_size_label", None),
                 evidence_score=evidence_score,
                 evidence_label=evidence_label,
                 citations_present=bool(finding.citations),
@@ -265,6 +291,8 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                     "comparison_claim_text": getattr(finding, "comparison_claim_text", None),
                     "finding_text_raw": finding.finding_text_raw,
                     "finding_text_plain": finding.finding_text_plain,
+                    "test_type": getattr(finding, "test_type", None),
+                    **(getattr(finding, "metadata", {}) or {}),
                 },
             )
             _add_unique_finding(findings, seen_texts, comparable)
@@ -302,12 +330,15 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
             )
             if not is_analytical_category(finding_category) or not is_comparison_claim_type(claim_type):
                 continue
+            if variable and (is_endpoint_like_variable(variable, endpoint_hint) or is_followup_time_variable(variable)):
+                continue
             if finding_category in {"endpoint_result", "survival_result"} and variable in {"death_event", "mortality", "survival", "survival_primary"}:
                 variable = None
             summary_parts = [variable or endpoint_hint or f"finding {idx}"]
             raw_p = finding.get("raw_p_value")
             adj_p = finding.get("adjusted_p_value")
             odds_ratio = _safe_float(finding.get("odds_ratio"))
+            provided_effect_label = str(finding.get("effect_size_label") or "").strip() or None
             if raw_p is not None:
                 summary_parts.append(f"raw p={raw_p}")
             if adj_p is not None:
@@ -327,7 +358,8 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
             direction = _infer_direction(
                 finding_text=raw_summary,
                 effect_size=odds_ratio if odds_ratio is not None else _safe_float(effect),
-                effect_size_label="odds_ratio" if odds_ratio is not None else "effect_size",
+                effect_size_label="odds_ratio" if odds_ratio is not None else provided_effect_label or "effect_size",
+                variable=variable,
             )
             plain_text = str(finding.get("finding_text_plain") or "").strip()
             raw_text = str(finding.get("finding_text_raw") or raw_summary).strip()
@@ -352,7 +384,7 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                 significant=_bool_or_none(finding.get("significant_after_correction")),
                 p_value=final_p_value,
                 effect_size=odds_ratio if odds_ratio is not None else _safe_float(effect),
-                effect_size_label="odds_ratio" if odds_ratio is not None else "effect_size",
+                effect_size_label="odds_ratio" if odds_ratio is not None else provided_effect_label or "effect_size",
                 direction=direction,
                 evidence_score=1.0 if finding.get("significant_after_correction") else 0.75,
                 evidence_label="corrected_statistical_result",
@@ -366,6 +398,8 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                     "comparison_claim_text": str(finding.get("comparison_claim_text") or "").strip() or None,
                     "finding_text_raw": raw_text,
                     "finding_text_plain": plain_text or None,
+                    "test_type": finding.get("test_type"),
+                    **(finding.get("metadata") if isinstance(finding.get("metadata"), dict) else {}),
                 },
             )
             _add_unique_finding(findings, seen_texts, comparable)
@@ -478,6 +512,14 @@ def _deterministic_relation(
             and qfinding.significant != hfinding.significant
         ):
             return "contradict", _contradiction_rationale(qfinding, hfinding)
+        if (
+            qfinding.significant is True
+            and hfinding.significant is True
+            and qfinding.direction in {"positive", "negative"}
+            and hfinding.direction in {"positive", "negative"}
+            and qfinding.direction != hfinding.direction
+        ):
+            return "contradict", _contradiction_rationale(qfinding, hfinding)
         if _bools_match(qfinding.significant, hfinding.significant) and _directions_compatible(
             qfinding.direction,
             hfinding.direction,
@@ -504,17 +546,22 @@ def _build_metrics(
     partial_count = sum(1 for match in matches if match.relation == "partial_agree")
     contradiction_count = sum(1 for match in matches if match.relation == "contradict")
     evidence_upgrades = sum(1 for match in matches if match.qtrial_evidence_stronger)
-    mcc_value, mcc_interpretation = _compute_mcc(matches)
+    mcc_value, mcc_interpretation, mcc_explanation = _compute_mcc(matches)
 
     total_qtrial = len(qtrial_findings)
     total_human = len(human_findings)
+    precision = _ratio(matched_pairs, total_qtrial)
+    recall = _ratio(matched_pairs, total_human)
+    f1 = round((2 * precision * recall) / (precision + recall), 4) if precision + recall > 0 else 0.0
     return ComparisonMetrics(
         total_qtrial_findings=total_qtrial,
         total_human_findings=total_human,
         matched_pairs=matched_pairs,
         qtrial_only_count=len(qtrial_only),
         human_only_count=len(human_only),
-        recall_against_human=_ratio(matched_pairs, total_human),
+        recall_against_human=recall,
+        precision_against_human=precision,
+        f1_against_human=f1,
         novel_rate=_ratio(len(qtrial_only), total_qtrial),
         agreement_count=agreement_count,
         partial_agreement_count=partial_count,
@@ -524,6 +571,7 @@ def _build_metrics(
         evidence_upgrade_rate=_ratio(evidence_upgrades, matched_pairs),
         mcc=mcc_value,
         mcc_interpretation=mcc_interpretation,
+        mcc_explanation=mcc_explanation,
     )
 
 
@@ -536,6 +584,8 @@ def _build_summary(metrics: ComparisonMetrics) -> str:
     )
     if metrics.mcc is not None and metrics.mcc_interpretation:
         summary += f" MCC on binary-significance matches was {metrics.mcc:.2f} ({metrics.mcc_interpretation})."
+    elif metrics.mcc_explanation:
+        summary += f" MCC was not computed: {metrics.mcc_explanation}"
     return summary
 
 
@@ -566,6 +616,15 @@ def _candidate_match_score(qfinding: ComparableFinding, hfinding: ComparableFind
     token_overlap = _token_overlap_ratio(qfinding.normalized_text, hfinding.normalized_text)
     same_variable = bool(qfinding.variable and hfinding.variable and qfinding.variable == hfinding.variable)
     if qfinding.variable and hfinding.variable and not same_variable:
+        return 0.0
+    if (
+        is_comparison_claim_type(qfinding.claim_type)
+        and is_comparison_claim_type(hfinding.claim_type)
+        and not same_variable
+        and (qfinding.variable or hfinding.variable)
+    ):
+        return 0.0
+    if not qfinding.variable and not hfinding.variable and not _endpoints_compatible(qfinding.endpoint, hfinding.endpoint):
         return 0.0
     same_endpoint = _endpoints_compatible(qfinding.endpoint, hfinding.endpoint)
     if token_overlap == 0.0 and not same_variable and not same_endpoint:
@@ -641,6 +700,7 @@ def _build_comparable_finding(
         finding_text,
         effect_size=final_effect_size,
         effect_size_label=final_effect_label,
+        variable=variable_value,
     )
     parsed_claim_type = claim_type or classify_claim_type(
         finding_text,
@@ -650,6 +710,10 @@ def _build_comparable_finding(
         significant=parsed_significant,
         p_value=parsed_p_value,
     )
+    parsed_category = finding_category
+    if variable_value and is_endpoint_like_variable(variable_value, endpoint_value):
+        parsed_claim_type = "artifact"
+        parsed_category = "artifact_excluded"
     return ComparableFinding(
         finding_id=finding_id,
         source=source,  # type: ignore[arg-type]
@@ -657,7 +721,7 @@ def _build_comparable_finding(
         finding_text=finding_text.strip(),
         normalized_text=normalized_text,
         section=section,
-        finding_category=finding_category,
+        finding_category=parsed_category,
         claim_type=parsed_claim_type,  # type: ignore[arg-type]
         variable=variable_value,
         endpoint=endpoint_value,
@@ -691,7 +755,7 @@ def _iter_candidates(raw_text: str) -> list[str]:
 
 
 def _clean_candidate(text: str) -> str:
-    return _WHITESPACE_RE.sub(" ", text).strip(" -•\t")
+    return _WHITESPACE_RE.sub(" ", text).strip(" #:-•\t")
 
 
 def _is_finding_candidate(text: str) -> bool:
@@ -699,16 +763,33 @@ def _is_finding_candidate(text: str) -> bool:
         return False
     if len(text.split()) < 4:
         return False
+    if _looks_like_non_claim_heading(text):
+        return False
     if _looks_like_section_header(text):
+        return False
+    lowered = text.lower()
+    if any(token in lowered for token in ("dataset comprises", "dataset included", "study included", "cohort included")):
+        return True
+    analytical_markers = (
+        "p=", "p <", "p<", "significant", "not significant", "hazard ratio",
+        "odds ratio", "associated", "correlated", "predictor", "predicts",
+        "confidence interval", "effect size", "higher probability", "lower probability",
+        "higher risk", "lower risk", "increased risk", "reduced risk",
+        "no relationship", "no association", "not associated", "relationship with",
+    )
+    if any(marker in lowered for marker in analytical_markers) or _extract_p_value(text) is not None:
         return True
     keywords = (
-        "p=", "p <", "p<", "significant", "not significant", "hazard ratio",
-        "odds ratio", "survival", "mortality", "baseline", "improved", "reduced",
-        "increased", "decreased", "difference", "associated", "correlated",
-        "confidence interval", "ci", "endpoint", "effect size", "probability", "risk",
+        "baseline imbalance",
+        "median survival",
+        "median follow-up",
+        "median follow up",
+        "event rate",
+        "mortality rate",
+        "survival differed",
+        "difference between",
     )
-    lowered = text.lower()
-    return any(keyword in lowered for keyword in keywords) or _extract_p_value(text) is not None
+    return any(keyword in lowered for keyword in keywords)
 
 
 def _looks_like_section_header(text: str) -> bool:
@@ -717,6 +798,29 @@ def _looks_like_section_header(text: str) -> bool:
         return True
     if len(cleaned.split()) <= 4 and cleaned.isalpha():
         return cleaned in _SECTION_HEADERS
+    return False
+
+
+def _looks_like_non_claim_heading(text: str) -> bool:
+    cleaned = text.strip().strip("#").strip().rstrip(":")
+    lowered = cleaned.lower()
+    if any(
+        phrase in lowered
+        for phrase in (
+            "clinical analysis report",
+            "mortality analysis report",
+            "survival analysis report",
+            "statistical analysis report",
+            "analyst report",
+        )
+    ):
+        return True
+    if len(cleaned.split()) <= 8 and not re.search(
+        r"\b(was|were|is|are|had|has|show|shows|showed|associated|predicts|predicted|significant|differed|difference|p\s*[=<>])\b",
+        lowered,
+    ):
+        if any(token in lowered for token in ("mortality", "survival", "endpoint", "ejection fraction", "analysis", "results")):
+            return True
     return False
 
 
@@ -826,7 +930,7 @@ def _ratio(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4)
 
 
-def _compute_mcc(matches: list[FindingMatch]) -> tuple[float | None, str | None]:
+def _compute_mcc(matches: list[FindingMatch]) -> tuple[float | None, str | None, str | None]:
     """
     Compute MCC on matched pairs with explicit binary significance labels.
 
@@ -840,6 +944,7 @@ def _compute_mcc(matches: list[FindingMatch]) -> tuple[float | None, str | None]
     into a pseudo-binary label. If the confusion matrix is degenerate, MCC is None.
     """
     tp = tn = fp = fn = 0
+    eligible = 0
     for match in matches:
         if match.relation == "partial_agree":
             continue
@@ -847,6 +952,7 @@ def _compute_mcc(matches: list[FindingMatch]) -> tuple[float | None, str | None]
         y_true = match.human_finding.significant
         if y_pred is None or y_true is None:
             continue
+        eligible += 1
         if y_pred and y_true:
             tp += 1
         elif (not y_pred) and (not y_true):
@@ -856,13 +962,19 @@ def _compute_mcc(matches: list[FindingMatch]) -> tuple[float | None, str | None]
         else:
             fn += 1
 
+    if eligible == 0:
+        return None, None, "no matched analytical association pairs had explicit binary significance labels."
     denominator = (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
     if denominator <= 0:
-        return None, None
+        return None, None, (
+            "the matched binary-significance table is degenerate and does not contain "
+            "both positive and negative classes; true negatives are not otherwise "
+            "defined outside an explicit candidate universe."
+        )
 
     value = ((tp * tn) - (fp * fn)) / sqrt(denominator)
     value = round(value, 4)
-    return value, _interpret_mcc(value)
+    return value, _interpret_mcc(value), "computed from matched analytical pairs with explicit significant/not-significant labels."
 
 
 def _interpret_mcc(value: float) -> str:
@@ -898,6 +1010,19 @@ def _infer_variable(text: str, known_variables: set[str] | None = None) -> str |
         for alias, canonical in alias_map.items():
             if alias in lowered:
                 return canonical
+
+    associated_with = re.search(r"\bassociated\s+with\s+([a-z][a-z0-9_ ]{2,40}?)(?:[.;,)]|$)", lowered)
+    if associated_with:
+        candidate = _canonicalize_variable_name(associated_with.group(1))
+        if candidate and not is_endpoint_like_variable(candidate):
+            return candidate
+
+    no_association_phrase = re.match(
+        r"^\s*([a-z][a-z0-9_ ]{2,40}?)\s+(?:did|does)\s+not\s+(?:show|demonstrate|have)\b",
+        lowered,
+    )
+    if no_association_phrase:
+        return _canonicalize_variable_name(no_association_phrase.group(1))
 
     leading_phrase = re.match(
         r"^\s*([a-z][a-z0-9_ ]{2,40}?)\s+(?:show|shows|showed|predicts|predicted|is|was|were|are|has|have|associated|increased|decreased|reduced)\b",
@@ -940,11 +1065,48 @@ def _build_variable_alias_map(variables: set[str]) -> dict[str, str]:
     return alias_map
 
 
+def _column_aliases(column: str) -> set[str]:
+    canonical = _canonicalize_variable_name(column) or column.lower()
+    aliases = {
+        column.lower(),
+        canonical,
+        canonical.replace("_", " "),
+        canonical.replace("_", ""),
+    }
+    aliases.update(_VARIABLE_SYNONYMS.get(canonical, set()))
+    return {alias for alias in aliases if alias}
+
+
 def _canonicalize_variable_name(value: str | None) -> str | None:
     if not value:
         return None
     cleaned = re.sub(r"[^a-z0-9_ ]", " ", value.lower())
     cleaned = re.sub(r"\s+", "_", cleaned).strip("_")
+    if not cleaned:
+        return None
+    cleaned = re.sub(r"^the_", "", cleaned)
+    for suffix in (
+        "_did_not_show",
+        "_did_not_demonstrate",
+        "_did_not_have",
+        "_does_not_show",
+        "_does_not_demonstrate",
+        "_does_not_have",
+        "_did_not",
+        "_does_not",
+        "_showed",
+        "_shows",
+        "_show",
+        "_were",
+        "_was",
+        "_are",
+        "_is",
+        "_levels",
+        "_level",
+    ):
+        if cleaned.endswith(suffix):
+            cleaned = cleaned[: -len(suffix)].strip("_")
+            break
     if not cleaned:
         return None
     for canonical, aliases in _VARIABLE_SYNONYMS.items():
@@ -962,8 +1124,21 @@ def _infer_direction(
     finding_text: str,
     effect_size: float | None = None,
     effect_size_label: str | None = None,
+    variable: str | None = None,
 ) -> str:
     lowered = finding_text.lower()
+    if variable:
+        aliases = _column_aliases(variable)
+        for alias in sorted(aliases, key=len, reverse=True):
+            escaped = re.escape(alias.lower())
+            if re.search(rf"\b(?:higher|increased|elevated|older)\s+{escaped}\b", lowered):
+                return "positive"
+            if re.search(rf"\b(?:lower|decreased|reduced|younger)\s+{escaped}\b", lowered):
+                return "negative"
+            if re.search(rf"\b{escaped}\s+(?:increased|was higher|were higher)\b", lowered):
+                return "positive"
+            if re.search(rf"\b{escaped}\s+(?:decreased|was lower|were lower)\b", lowered):
+                return "negative"
     for direction, phrases in _DIRECTION_HINTS.items():
         if any(phrase in lowered for phrase in phrases):
             return direction
@@ -1027,9 +1202,11 @@ def _endpoints_compatible(left: str | None, right: str | None) -> bool:
 def _agreement_rationale(qfinding: ComparableFinding, hfinding: ComparableFinding) -> str:
     variable = _display_variable(qfinding, hfinding)
     endpoint = _display_endpoint(qfinding, hfinding)
+    significant = qfinding.significant if qfinding.significant is not None else hfinding.significant
+    association = "a statistically significant association" if significant is not False else "no statistically significant association"
     if endpoint:
-        return f"Both reports identify {variable} as significantly associated with {endpoint}."
-    return f"Both reports identify {variable} as significantly associated with the outcome."
+        return f"Both reports identify {association} between {variable} and {endpoint}."
+    return f"Both reports identify {association} for {variable}."
 
 
 def _contradiction_rationale(qfinding: ComparableFinding, hfinding: ComparableFinding) -> str:

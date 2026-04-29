@@ -280,6 +280,40 @@ def test_directionally_wrong_significant_claim_is_contradicted() -> None:
     assert "direction" in claim.rationale
 
 
+def test_or_below_one_supports_lower_ejection_fraction_higher_mortality_claim() -> None:
+    df = pd.DataFrame(
+        {
+            "ejection_fraction": [
+                60, 58, 56, 54, 52, 50, 48, 46, 44, 42,
+                40, 38, 36, 34, 32, 30, 28, 26, 24, 22,
+                59, 55, 51, 47, 43, 39, 35, 31, 27, 23,
+            ] * 2,
+            "DEATH_EVENT": [
+                0, 0, 0, 0, 0, 0, 0, 1, 0, 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
+            ] * 2,
+        }
+    )
+
+    report = build_statistical_verification_report(
+        df=df,
+        qtrial_findings=[],
+        analyst_report_text=(
+            "Lower ejection_fraction was associated with higher mortality risk "
+            "(OR=0.90, p<0.05)."
+        ),
+    )
+
+    claim = report.claims[0]
+    assert claim.label in {"verified", "partial"}
+    assert claim.test_used == "logistic_regression"
+    assert claim.effect_size is not None
+    assert claim.effect_size < 1
+    assert claim.effect_agreement != "conflicts"
+    assert "direction" not in claim.rationale.lower() or "conflicts" not in claim.rationale.lower()
+
+
 def test_p_greater_than_threshold_is_not_treated_as_significant() -> None:
     df = pd.DataFrame(
         {

@@ -938,10 +938,16 @@ def _section_variable_selection(quantum_evidence: dict) -> str:
         f"This reduces redundancy between variables and focuses the analysis on the "
         f"strongest signals relative to the outcome."
     )
-    lines.append(
-        f"\nMean correlation between variables reduced from **{redundancy_before*100:.1f}%** "
-        f"to **{redundancy_after*100:.1f}%** (**{redundancy_reduction_pct:.1f}%** reduction)."
-    )
+    before_pct = redundancy_before * 100
+    after_pct = redundancy_after * 100
+    delta_pct = after_pct - before_pct
+    if delta_pct < 0:
+        change_text = f"decreased from **{before_pct:.1f}%** to **{after_pct:.1f}%** (**{abs(delta_pct):.1f}%** absolute decrease)."
+    elif delta_pct > 0:
+        change_text = f"increased from **{before_pct:.1f}%** to **{after_pct:.1f}%** (**{delta_pct:.1f}%** absolute increase)."
+    else:
+        change_text = f"remained unchanged at **{before_pct:.1f}%**."
+    lines.append(f"\nMean correlation between variables {change_text}")
     if selection_method == "relevance_fallback":
         lines.append(
             "\n> ⚠️ **Note:** Solver redundancy reduction was insufficient; fallback to top "

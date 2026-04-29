@@ -60,7 +60,7 @@ def translate_findings_to_cst(
     client = get_client(provider)
     # Deduplicate and cap
     seen: set[str] = set()
-    deduped: list[dict[str, str]] = []
+    deduped: list[dict[str, Any]] = []
     for f in findings:
         payload = _coerce_finding_payload(f)
         key = (payload["plain"] or payload["raw"]).strip().lower()
@@ -70,7 +70,28 @@ def translate_findings_to_cst(
         if len(deduped) >= max_terms:
             break
 
-    def _translate_one(payload: dict[str, str]) -> ClinicalSearchTerm:
+    def _base_cst_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "source_finding_raw": payload["raw"],
+            "source_finding_plain": payload["plain"] or payload["raw"],
+            "comparison_claim_text": payload.get("comparison_claim_text") or None,
+            "finding_category": payload["finding_category"],
+            "claim_type": payload["claim_type"],
+            "variable": payload.get("variable") or None,
+            "endpoint": payload.get("endpoint") or None,
+            "direction": payload.get("direction") or "unknown",
+            "direction_label": payload.get("direction_label") or None,
+            "significant": payload.get("significant"),
+            "significance": payload.get("significance") or "unclear",
+            "p_value": payload.get("p_value"),
+            "effect_size": payload.get("effect_size"),
+            "effect_size_label": payload.get("effect_size_label") or None,
+            "test_type": payload.get("test_type") or None,
+            "confidence_warning": payload.get("confidence_warning") or None,
+            "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        }
+
+    def _translate_one(payload: dict[str, Any]) -> ClinicalSearchTerm:
         finding = payload["plain"] or payload["raw"]
         user_prompt = (
             f"Study context: {study_context}\n\n"
@@ -91,22 +112,14 @@ def translate_findings_to_cst(
                 raise ValueError("Empty term returned")
             return ClinicalSearchTerm(
                 source_finding=finding,
-                source_finding_raw=payload["raw"],
-                source_finding_plain=payload["plain"] or finding,
-                comparison_claim_text=payload.get("comparison_claim_text") or None,
-                finding_category=payload["finding_category"],
-                claim_type=payload["claim_type"],
+                **_base_cst_kwargs(payload),
                 term=term,
                 study_context_used=study_context,
             )
         except Exception as exc:
             return ClinicalSearchTerm(
                 source_finding=finding,
-                source_finding_raw=payload["raw"],
-                source_finding_plain=payload["plain"] or finding,
-                comparison_claim_text=payload.get("comparison_claim_text") or None,
-                finding_category=payload["finding_category"],
-                claim_type=payload["claim_type"],
+                **_base_cst_kwargs(payload),
                 term="",
                 study_context_used=study_context,
                 translation_failed=True,
@@ -126,13 +139,15 @@ def translate_findings_to_cst(
     return [r for r in results if r is not None]
 
 
-def _coerce_finding_payload(finding: str | dict[str, Any]) -> dict[str, str]:
+def _coerce_finding_payload(finding: str | dict[str, Any]) -> dict[str, Any]:
     if isinstance(finding, str):
         return {
             "raw": finding,
             "plain": finding,
             "finding_category": "analytical",
             "claim_type": "association_claim",
+            "direction": "unknown",
+            "significance": "unclear",
         }
     raw = str(finding.get("finding_text_raw") or finding.get("raw") or finding.get("finding_text") or "").strip()
     plain = str(finding.get("finding_text_plain") or finding.get("plain") or finding.get("finding_text") or raw).strip()
@@ -141,10 +156,35 @@ def _coerce_finding_payload(finding: str | dict[str, Any]) -> dict[str, str]:
     ).strip()
     category = str(finding.get("finding_category") or "analytical").strip() or "analytical"
     claim_type = str(finding.get("claim_type") or "association_claim").strip() or "association_claim"
+    p_value = finding.get("p_value", finding.get("adjusted_p_value", finding.get("raw_p_value")))
+    effect_size_label = finding.get("effect_size_label")
+    effect_size = finding.get("effect_size")
+    if finding.get("odds_ratio") is not None:
+        effect_size = finding.get("odds_ratio")
+        effect_size_label = "odds_ratio"
+    significant = finding.get("significant_after_correction", finding.get("significant"))
     return {
         "raw": raw or plain,
         "plain": plain or raw,
         "comparison_claim_text": comparison_claim,
         "finding_category": category,
         "claim_type": claim_type,
+        "variable": finding.get("variable"),
+        "endpoint": finding.get("endpoint"),
+        "direction": finding.get("direction") or "unknown",
+        "direction_label": finding.get("direction_label"),
+        "significant": significant if isinstance(significant, bool) else None,
+        "significance": (
+            "significant"
+            if significant is True
+            else "not_significant"
+            if significant is False
+            else str(finding.get("significance") or "unclear")
+        ),
+        "p_value": p_value,
+        "effect_size": effect_size,
+        "effect_size_label": effect_size_label,
+        "test_type": finding.get("test_type") or finding.get("test_used"),
+        "confidence_warning": finding.get("confidence_warning"),
+        "metadata": finding.get("metadata") if isinstance(finding.get("metadata"), dict) else {},
     }

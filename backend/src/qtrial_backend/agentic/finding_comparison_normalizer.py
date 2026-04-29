@@ -57,7 +57,12 @@ def normalize_comparison_claims(
     if not findings:
         return findings
 
-    eligible = [f for f in findings if str(f.get("claim_type") or "") == "association_claim"]
+    eligible = [
+        f
+        for f in findings
+        if str(f.get("claim_type") or "")
+        in {"association_claim", "analytical_association", "negative_association"}
+    ]
     if not eligible:
         return findings
 
@@ -100,7 +105,11 @@ def normalize_comparison_claims(
     updated: list[dict[str, Any]] = []
     for finding in findings:
         clone = dict(finding)
-        if str(finding.get("claim_type") or "") != "association_claim":
+        if str(finding.get("claim_type") or "") not in {
+            "association_claim",
+            "analytical_association",
+            "negative_association",
+        }:
             clone.setdefault("comparison_claim_text", None)
             updated.append(clone)
             continue

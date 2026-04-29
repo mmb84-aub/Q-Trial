@@ -827,6 +827,18 @@ class ClinicalSearchTerm(BaseModel):
     comparison_claim_text: str | None = None
     finding_category: FindingCategory = "analytical"
     claim_type: ClaimType = "association_claim"
+    variable: str | None = None
+    endpoint: str | None = None
+    direction: Literal["positive", "negative", "none", "unknown"] = "unknown"
+    direction_label: str | None = None
+    significant: bool | None = None
+    significance: Literal["significant", "not_significant", "unclear"] = "unclear"
+    p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    test_type: str | None = None
+    confidence_warning: str | list[str] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     term: str
     study_context_used: str
     translation_failed: bool = False
@@ -852,6 +864,16 @@ class GroundedFinding(BaseModel):
     grounding_status: GroundingStatusLabel
     finding_category: FindingCategory = "analytical"
     claim_type: ClaimType = "association_claim"
+    variable: str | None = None
+    endpoint: str | None = None
+    direction: Literal["positive", "negative", "none", "unknown"] = "unknown"
+    direction_label: str | None = None
+    significant: bool | None = None
+    significance: Literal["significant", "not_significant", "unclear"] = "unclear"
+    p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    test_type: str | None = None
     citations: list[LiteratureArticle] = Field(default_factory=list)
     evidence_strength: EvidenceStrengthScore | None = None
     novel_statement: str | None = None
@@ -860,6 +882,7 @@ class GroundedFinding(BaseModel):
     test_selection_rationale: str | None = None
     missingness_disclosure: str | None = None
     confidence_warning: str | list[str] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── New schemas: Research Questions, Synthesis, Missingness ──────────────────
@@ -966,6 +989,8 @@ class ComparisonMetrics(BaseModel):
     qtrial_only_count: int = 0
     human_only_count: int = 0
     recall_against_human: float = 0.0
+    precision_against_human: float = 0.0
+    f1_against_human: float = 0.0
     novel_rate: float = 0.0
     agreement_count: int = 0
     partial_agreement_count: int = 0
@@ -975,6 +1000,7 @@ class ComparisonMetrics(BaseModel):
     evidence_upgrade_rate: float = 0.0
     mcc: float | None = None
     mcc_interpretation: str | None = None
+    mcc_explanation: str | None = None
 
 
 class HumanReportParseResult(BaseModel):
