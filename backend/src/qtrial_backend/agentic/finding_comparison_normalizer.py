@@ -63,7 +63,7 @@ def normalize_comparison_claims(
         for f in findings
         if str(f.get("claim_type") or "")
         in {"association_claim", "analytical_association", "negative_association"}
-        and not is_user_facing_nonfinding_artifact(f)
+        and (not is_user_facing_nonfinding_artifact(f) or _has_structured_association_payload(f))
     ]
     if not eligible:
         return findings
@@ -107,7 +107,7 @@ def normalize_comparison_claims(
     updated: list[dict[str, Any]] = []
     for finding in findings:
         clone = dict(finding)
-        if is_user_facing_nonfinding_artifact(finding):
+        if is_user_facing_nonfinding_artifact(finding) and not _has_structured_association_payload(finding):
             clone.setdefault("comparison_claim_text", None)
             updated.append(clone)
             continue
@@ -162,6 +162,21 @@ def _validate_sentence(sentence: str, finding: dict[str, Any]) -> str | None:
         return None
 
     return cleaned if cleaned.endswith((".", "!", "?")) else f"{cleaned}."
+
+
+def _has_structured_association_payload(finding: dict[str, Any]) -> bool:
+    return bool(str(finding.get("finding_id") or finding.get("variable") or "").strip()) and any(
+        finding.get(key) is not None
+        for key in (
+            "adjusted_p_value",
+            "raw_p_value",
+            "p_value",
+            "effect_size",
+            "odds_ratio",
+            "significant_after_correction",
+            "significant",
+        )
+    )
 
 
 def _sentence_count(text: str) -> int:

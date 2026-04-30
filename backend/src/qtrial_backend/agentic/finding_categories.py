@@ -93,6 +93,8 @@ _DATA_QUALITY_PATTERNS = (
     "constant columns",
     "outlier",
     "outliers",
+    "outlier summary",
+    "outlier summaries",
     "baseline imbalance",
     "mcar",
     "missingness",
@@ -109,6 +111,11 @@ _PREPROCESSING_PATTERNS = (
     "excluded from primary analysis",
     "preprocess",
     "pre-processing",
+    "qubo",
+    "feature selection",
+    "feature-selector",
+    "selected via",
+    "selected using",
 )
 
 _PIPELINE_WARNING_PATTERNS = (
@@ -149,6 +156,15 @@ _QC_NOTE_PATTERNS = (
     "adjusted treatment p",
     "treatment-effect",
     "treatment effect",
+    "normality",
+    "shapiro",
+    "kolmogorov",
+    "anderson-darling",
+    "test selection",
+    "test-selection",
+    "model selection",
+    "study design",
+    "study-design",
 )
 
 _METHODOLOGY_INSTRUCTION_PATTERNS = (
@@ -247,6 +263,7 @@ _PRIMARY_ARTIFACT_TEXT_FIELDS = (
     "source_finding",
     "source_text",
     "plain",
+    "finding_text_raw",
 )
 _CLINICAL_INTERPRETATION_PHRASES = (
     "associated with",
@@ -282,21 +299,128 @@ _NON_FINDING_HEADER_RE = re.compile(
 _NON_FINDING_WRAPPER_PHRASES = (
     "all continuous variables are non-normal",
     "all continuous variables are non normal",
+    "all continuous variables rejected normality",
+    "all continuous variables reject normality",
+    "continuous variables rejected normality",
+    "continuous variables reject normality",
 )
 
 _METADATA_PATTERNS = (
     "dataset comprises",
     "dataset included",
+    "dataset includes",
     "cohort comprised",
     "patients were included",
     "subjects were included",
     "study included",
     "trial included",
+    "study design",
+    "trial design",
     "baseline cohort",
     "cohort consisted",
     "patient characteristics",
+    "predictor variables selected",
+    "variables selected via",
+    "variables selected using",
 )
 
+_DANGLING_ENDING_RE = re.compile(
+    r"(?:\bvs\.?|\bversus|\bcompared\s+with|\bcompared\s+to|\brelative\s+to|"
+    r"\bthan|\bbetween|\band|\bor|[(\[{])\s*$",
+    re.IGNORECASE,
+)
+_BARE_NUMERIC_FRAGMENT_START_RE = re.compile(
+    r"^\s*(?:[-*•]|\d+[.)])?\s*"
+    r"(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|"
+    r"(?:p|hr|or|rr|ci|auc|smd|χ\s*[²2]|chi\s*-?\s*square)\b)",
+    re.IGNORECASE,
+)
+_STARTS_WITH_BARE_STAT_RE = re.compile(
+    r"^\s*(?:[-*•]|\d+[.)])?\s*"
+    r"(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?\s*"
+    r"(?:%|mg/dl|mmol/l|g/dl|days?|years?|months?|ng/ml|u/l|iu/l|cm|mm|kg|bpm|mmhg)?|"
+    r"(?:p|hr|or|rr|ci|auc|smd|χ\s*[²2]|chi\s*-?\s*square)\s*(?:=|<|>|≤|≥|:))",
+    re.IGNORECASE,
+)
+_CONTINUATION_START_RE = re.compile(
+    r"^\s*(?:[-*•]|\d+[.)])?\s*(?:vs\.?|versus|compared\s+(?:with|to)|"
+    r"relative\s+to|than|and|or|respectively|whereas|while)\b",
+    re.IGNORECASE,
+)
+_WRAPPER_LABEL_RE = re.compile(
+    r"^\s*(?:[-*•]|\d+[.)])?\s*(?:\*\*|__)?\s*"
+    r"(?:interpretation|event\s+rate|primary\s+analysis\s+results?|"
+    r"characteristics\s+by\b[^:]*|prevalence\s+of\b[^:]*|"
+    r"independent\s+predictors?|effect\s+size|study\s+design|"
+    r"dataset\s+summary|key\s+statistical\s+findings|"
+    r"clinical\s+analysis\s+report|statistical\s+notes?|data\s+quality\s+notes?)"
+    r"\s*(?:\*\*|__)?\s*:",
+    re.IGNORECASE,
+)
+_P_VALUE_SIGNAL_RE = re.compile(r"\bp(?:\s*[- ]?\s*value)?\s*(?:=|<|>|<=|>=|≤|≥)", re.IGNORECASE)
+_RELATIONSHIP_RE = re.compile(
+    r"\b(?:associated|association|predicts?|predicted|correlated|correlation|"
+    r"differ(?:ed|ence)?|increased|decreased|reduced|lowered|higher|lower|"
+    r"greater|less|fewer|significant|not significant|show(?:ed|s)?|demonstrat(?:ed|es?)|"
+    r"odds|hazard|risk|mortality|survival|outcome|endpoint)\b",
+    re.IGNORECASE,
+)
+_SUBJECT_VERB_RE = re.compile(
+    r"\b[a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*){0,5}\s+"
+    r"(?:was|were|is|are|had|has|showed|shows|did|does|predicts?|predicted|"
+    r"correlated|differed|increased|decreased|reduced|lowered)\b",
+    re.IGNORECASE,
+)
+_CLINICAL_RELATION_RE = re.compile(
+    r"\b(?:(?:significantly\s+|statistically\s+|strongly\s+)?associated\s+with|"
+    r"associated\s+(?:significantly\s+|statistically\s+|strongly\s+)?with|"
+    r"association\s+with|not\s+(?:significantly\s+)?associated|"
+    r"did\s+not\s+show(?:\s+a)?(?:\s+statistically)?\s+significant\s+association|"
+    r"showed\s+no(?:\s+statistically)?\s+significant\s+association|"
+    r"show(?:s|ed)?\s+no(?:\s+(?:strong|statistically\s+significant|significant))?\s+relationship|"
+    r"did\s+not\s+show(?:\s+a)?(?:\s+(?:strong|statistically\s+significant|significant))?\s+relationship|"
+    r"no(?:\s+(?:strong|statistically\s+significant|significant))?\s+relationship\s+with|"
+    r"predicts?|predicted|predictor(?:s)?\s+of|correlated\s+with|"
+    r"positively\s+correlated|negatively\s+correlated|"
+    r"differ(?:ed|s)?(?:\s+significantly)?\s+(?:between|in)|"
+    r"was\s+(?:statistically\s+|significantly\s+)?significant\s+(?:for|with|in)|"
+    r"were\s+(?:statistically\s+|significantly\s+)?significant\s+(?:for|with|in)|"
+    r"was\s+higher|were\s+higher|was\s+lower|were\s+lower|"
+    r"increased|decreased|reduces?|lowered|raises?|raised|"
+    r"had\s+(?:a\s+)?(?:significantly\s+)?(?:higher|lower|increased|decreased|reduced))\b",
+    re.IGNORECASE,
+)
+_OUTCOME_OR_GROUP_RE = re.compile(
+    r"\b(?:mortality|death|deaths|survival|outcome|endpoint|risk|odds|hazard|event|"
+    r"patients?\s+who\s+died|survivors?|non[-\s]?survivors?|groups?|treatment\s+arm|"
+    r"control\s+group|compared\s+with|compared\s+to|between)\b",
+    re.IGNORECASE,
+)
+_NO_VARIABLE_START_RE = re.compile(
+    r"^\s*(?:[-*•]|\d+[.)])?\s*(?:\*\*|__)?\s*"
+    r"(?:no\s+association|association|relationship|difference|mortality|death|survival|outcome|endpoint)\b",
+    re.IGNORECASE,
+)
+_VARIABLE_SUBJECT_RE = re.compile(
+    r"^\s*(?:[-*•]|\d+[.)])?\s*(?:\*\*|__)?\s*"
+    r"(?:each\s+\d+(?:\.\d+)?%?\s+increase\s+in\s+|higher|lower|elevated|reduced|older|younger)?\s*"
+    r"[a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*){0,5}\s+"
+    r"(?:was|were|is|are|had|has|show|showed|shows|did|does|predicts?|predicted|"
+    r"correlated|differed|increased|decreased|reduces?|lowered|raises?|raised)\b",
+    re.IGNORECASE,
+)
+_GROUP_COMPARISON_WITH_VARIABLE_RE = re.compile(
+    r"\bpatients?\s+who\s+died\b|\bsurvivors?\b|\bnon[-\s]?survivors?\b|\bgroups?\b",
+    re.IGNORECASE,
+)
+_PASSIVE_ENDPOINT_VARIABLE_RE = re.compile(
+    r"^\s*(?:mortality|death|survival|outcome|endpoint|risk|odds|hazard|event)\s+"
+    r"(?:was|were|is|are)\s+(?:significantly\s+|statistically\s+|strongly\s+)?"
+    r"(?:associated|related|linked)\s+with\s+"
+    r"(?!p\s*(?:=|<|>|≤|≥))"
+    r"[a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*){0,4}\b",
+    re.IGNORECASE,
+)
 
 def is_analytical_category(category: str | None) -> bool:
     return (category or "analytical") in ANALYTICAL_FINDING_CATEGORIES
@@ -331,6 +455,110 @@ def is_raw_statistical_artifact_text(text: str) -> bool:
     return not any(phrase in lowered for phrase in _CLINICAL_INTERPRETATION_PHRASES)
 
 
+def is_user_facing_clinical_finding_eligible(finding: Any) -> bool:
+    """Strict final gate for standalone analytical clinical findings."""
+    text = _first_text_field(finding, _PRIMARY_ARTIFACT_TEXT_FIELDS) if not isinstance(finding, str) else finding
+    if not text:
+        return False
+    cleaned = _clean_header_candidate(text)
+    if not cleaned:
+        return False
+    matching_text = cleaned.replace("_", " ")
+    lowered = cleaned.lower()
+    if is_user_facing_nonfinding_artifact(cleaned):
+        return False
+    if _WRAPPER_LABEL_RE.match(cleaned):
+        return False
+    if _BARE_NUMERIC_FRAGMENT_START_RE.match(cleaned):
+        return False
+    if _STARTS_WITH_BARE_STAT_RE.match(cleaned):
+        return False
+    passive_endpoint_variable = bool(_PASSIVE_ENDPOINT_VARIABLE_RE.search(matching_text))
+    if _NO_VARIABLE_START_RE.match(cleaned) and not passive_endpoint_variable:
+        return False
+    if re.match(
+        r"^\s*(?:[-*•]|\d+[.)])?\s*(?:this|these|that|those)\s+"
+        r"(?:variable|variables|factor|factors|covariate|covariates|predictor|predictors)\b",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return False
+    if any(pattern in lowered for pattern in (*_METADATA_PATTERNS, *_PREPROCESSING_PATTERNS, *_QC_NOTE_PATTERNS)):
+        return False
+    if any(pattern in lowered for pattern in _DESCRIPTIVE_PATTERNS):
+        if not _CLINICAL_RELATION_RE.search(cleaned):
+            return False
+
+    has_relation = bool(_CLINICAL_RELATION_RE.search(matching_text))
+    has_outcome_or_group = bool(_OUTCOME_OR_GROUP_RE.search(matching_text))
+    has_variable_subject = bool(_VARIABLE_SUBJECT_RE.search(cleaned))
+    has_passive_variable_claim = passive_endpoint_variable
+    has_group_variable_claim = bool(
+        _GROUP_COMPARISON_WITH_VARIABLE_RE.search(matching_text)
+        and re.search(r"\b(?:higher|lower|increased|decreased|reduced|elevated)\s+[a-z][a-z0-9_-]+", cleaned, re.IGNORECASE)
+    )
+    if not has_relation or not has_outcome_or_group:
+        return False
+    if not has_variable_subject and not has_group_variable_claim and not has_passive_variable_claim:
+        return False
+    return True
+
+
+def is_malformed_finding_fragment_text(text: str) -> bool:
+    """Return True for snippets that cannot stand alone as clinical findings."""
+    cleaned = _clean_header_candidate(text)
+    if not cleaned:
+        return True
+    lowered = cleaned.lower()
+    if len(cleaned.split()) < 4:
+        return True
+    if any(
+        pattern in lowered
+        for pattern in (
+            *_PREPROCESSING_PATTERNS,
+            *_DATA_QUALITY_PATTERNS,
+            *_QC_NOTE_PATTERNS,
+            *_METADATA_PATTERNS,
+        )
+    ):
+        return False
+    if _DANGLING_ENDING_RE.search(cleaned):
+        return True
+    if cleaned.count("(") > cleaned.count(")") or cleaned.count("[") > cleaned.count("]"):
+        return True
+    if _CONTINUATION_START_RE.match(cleaned):
+        return True
+    if _BARE_NUMERIC_FRAGMENT_START_RE.match(cleaned) and len(cleaned.split()) <= 12 and not _SUBJECT_VERB_RE.search(cleaned):
+        return True
+    if _STARTS_WITH_BARE_STAT_RE.match(cleaned) and not _SUBJECT_VERB_RE.search(cleaned):
+        return True
+
+    has_p_value = bool(_P_VALUE_SIGNAL_RE.search(cleaned))
+    has_claim_structure = bool(_SUBJECT_VERB_RE.search(cleaned) and _RELATIONSHIP_RE.search(cleaned))
+    if has_p_value and not has_claim_structure:
+        return True
+    if (
+        any(token in lowered for token in ("significant", "associated", "correlat"))
+        or re.search(r"\bpredicts?\b|\bpredicted\b", lowered)
+    ):
+        return not has_claim_structure
+    return False
+
+
+def is_malformed_finding_fragment(finding: Any) -> bool:
+    if isinstance(finding, str):
+        return is_malformed_finding_fragment_text(finding)
+
+    primary_text = _first_text_field(finding, _PRIMARY_ARTIFACT_TEXT_FIELDS)
+    if primary_text:
+        return is_malformed_finding_fragment_text(primary_text)
+
+    return any(
+        is_malformed_finding_fragment_text(text)
+        for text in _iter_text_fields(finding, _RAW_STAT_ARTIFACT_TEXT_FIELDS)
+    )
+
+
 def is_raw_stat_artifact_finding(finding: Any) -> bool:
     """Hard final gate for raw variable-only statistical artifact findings.
 
@@ -357,6 +585,13 @@ def is_non_finding_header_artifact_text(text: str) -> bool:
     if not cleaned:
         return True
     lowered = cleaned.lower()
+    if re.match(
+        r"^\s*(?:this|these|that|those)\s+"
+        r"(?:variable|variables|factor|factors|covariate|covariates|predictor|predictors)\b",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return True
     if _NON_FINDING_HEADER_RE.match(cleaned):
         return True
     if any(phrase in lowered for phrase in _NON_FINDING_WRAPPER_PHRASES):
@@ -406,7 +641,11 @@ def is_non_finding_header_artifact(finding: Any) -> bool:
 
 
 def is_user_facing_nonfinding_artifact(finding: Any) -> bool:
-    return is_raw_stat_artifact_finding(finding) or is_non_finding_header_artifact(finding)
+    return (
+        is_malformed_finding_fragment(finding)
+        or is_raw_stat_artifact_finding(finding)
+        or is_non_finding_header_artifact(finding)
+    )
 
 
 def _clean_header_candidate(text: str) -> str:
@@ -481,6 +720,10 @@ def classify_finding_category(
         return "qc_note"
     if any(pattern in lowered for pattern in _QC_NOTE_PATTERNS):
         return "qc_note"
+    if any(pattern in lowered for pattern in _METADATA_PATTERNS):
+        return "qc_note"
+    if is_malformed_finding_fragment_text(text):
+        return "artifact_excluded"
 
     if variable or analysis_type == "association":
         if variable and endpoint and variable.strip().lower() == endpoint.strip().lower():

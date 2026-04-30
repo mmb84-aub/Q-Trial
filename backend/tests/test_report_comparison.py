@@ -89,9 +89,9 @@ def test_parse_human_report_uses_current_section_header() -> None:
         "analyst.txt",
         """
         Results:
-        - Mortality was statistically significant with p=0.01 [1].
+        - Age was statistically significant for mortality with p=0.01 [1].
         Discussion:
-        - Survival was not significant after correction (p=0.20).
+        - Smoking was not significantly associated with mortality (p=0.20).
         """,
     )
 
@@ -157,7 +157,7 @@ def test_human_parser_extracts_cohens_d_and_correlation() -> None:
         "analyst.txt",
         """
         Age differed between treatment groups (Cohen's d = -0.60).
-        Serum sodium correlated with age (Spearman ρ=-0.54).
+        Serum sodium correlated with mortality risk (Spearman ρ=-0.54).
         """,
         known_variables={"age", "serum_sodium"},
     )
@@ -1105,7 +1105,10 @@ def test_comparison_falls_back_to_raw_qtrial_text_when_plain_text_missing() -> N
     )
 
     assert comparison.metrics.matched_pairs == 1
-    assert "adjusted p=0.0001" in comparison.matched_findings[0].text_used_for_matching["qtrial"]
+    assert comparison.matched_findings[0].text_used_for_matching["qtrial"] == (
+        "Age was significantly associated with the outcome."
+    )
+    assert comparison.matched_findings[0].qtrial_finding.p_value == 0.0001
 
 
 def test_same_variable_with_incomplete_endpoint_alignment_is_partial_agree() -> None:
@@ -1382,6 +1385,124 @@ def test_followup_time_context_is_not_an_analytical_human_claim() -> None:
     assert comparison.metrics.total_human_findings == 0
     assert comparison.metrics.matched_pairs == 0
     assert comparison.metrics.qtrial_only_count == 1
+
+
+def test_qtrial_only_excludes_malformed_and_contextual_findings() -> None:
+    report = _make_report(
+        [
+            {
+                "finding_id": "bad_fragment",
+                "finding_text_plain": "1.18 mg/dL (p<0.001, adjusted p=0.00014)",
+                "finding_category": "analytical",
+                "claim_type": "association_claim",
+            },
+            {
+                "finding_id": "qubo",
+                "finding_text_plain": "The dataset includes 8 predictor variables selected via QUBO feature selection.",
+                "finding_category": "analytical",
+                "claim_type": "association_claim",
+            },
+            {
+                "finding_id": "serum_creatinine",
+                "finding_text_plain": "Higher serum creatinine was associated with higher mortality risk.",
+                "finding_category": "analytical",
+                "claim_type": "association_claim",
+                "variable": "serum_creatinine",
+                "endpoint": "mortality",
+                "significant_after_correction": True,
+                "adjusted_p_value": 0.001,
+            },
+        ]
+    )
+
+    comparison = build_comparison_report(
+        final_report=report,
+        analyst_report_name="analyst.txt",
+        analyst_report_text="",
+        provider="gemini",
+    )
+
+    assert comparison.metrics.qtrial_only_count == 1
+    assert comparison.qtrial_only_findings[0].variable == "serum_creatinine"
+    assert all("QUBO" not in finding.finding_text for finding in comparison.qtrial_only_findings)
+
+
+def test_qtrial_only_excludes_continuation_wrappers_and_context_stats() -> None:
+    report = _make_report(
+        [
+            {
+                "finding_id": "fragment",
+                "finding_text_plain": "1.18 mg/dL, 56% increase), indicating renal dysfunction is strongly associated with mortality.",
+                "finding_category": "analytical",
+                "claim_type": "association_claim",
+            },
+            {
+                "finding_id": "interpretation",
+                "finding_text_plain": "- **Interpretation:** No association with mortality (41.7% diabetic in both groups).",
+                "finding_category": "analytical",
+                "claim_type": "association_claim",
+            },
+            {
+                "finding_id": "event_rate",
+                "finding_text_plain": "**Event rate:** 32.1% (96 deaths out of 299 patients).",
+                "finding_category": "analytical",
+                "claim_type": "association_claim",
+            },
+            {
+                "finding_id": "smoking",
+                "finding_text_plain": "Smoking was not significantly associated with mortality.",
+                "finding_category": "analytical",
+                "claim_type": "negative_association",
+                "variable": "smoking",
+                "endpoint": "mortality",
+                "significant_after_correction": False,
+                "adjusted_p_value": 0.41,
+            },
+        ]
+    )
+
+    comparison = build_comparison_report(
+        final_report=report,
+        analyst_report_name="analyst.txt",
+        analyst_report_text="",
+        provider="gemini",
+    )
+
+    assert [finding.finding_text for finding in comparison.qtrial_only_findings] == [
+        "Smoking was not significantly associated with mortality."
+    ]
+
+
+def test_fragment_cannot_be_matched_to_age_finding() -> None:
+    report = _make_report(
+        [
+            {
+                "finding_id": "fragment",
+                "finding_text_plain": "1.18 mg/dL, 56% increase), indicating renal dysfunction is strongly associated with mortality.",
+                "finding_category": "analytical",
+                "claim_type": "association_claim",
+            }
+        ]
+    )
+
+    comparison = build_comparison_report(
+        final_report=report,
+        analyst_report_name="analyst.txt",
+        analyst_report_text="Older patients had significantly higher probability of death during follow-up.",
+        provider="gemini",
+    )
+
+    assert comparison.metrics.matched_pairs == 0
+    assert comparison.qtrial_only_findings == []
+
+
+def test_human_parser_drops_generic_variable_artifacts() -> None:
+    parsed = parse_human_report_text(
+        "analyst.txt",
+        "These variables were significantly associated with mortality (p<0.01).",
+    )
+
+    assert parsed.findings == []
 
 
 def test_build_metrics_counts_partial_agreement() -> None:

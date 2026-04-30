@@ -23,6 +23,7 @@ from qtrial_backend.agentic.finding_categories import (
     is_followup_time_variable,
     is_raw_stat_artifact_finding,
     is_raw_statistical_artifact_text,
+    is_user_facing_clinical_finding_eligible,
     is_user_facing_nonfinding_artifact,
 )
 from qtrial_backend.agentic.schemas import (
@@ -102,6 +103,13 @@ _SECTION_HEADERS = [
     "statistical notes",
     "data quality notes",
 ]
+_GENERIC_VARIABLE_SUBJECT_RE = re.compile(
+    r"^\s*(?:these|those|this|that|the)\s+"
+    r"(?:variables?|factors?|predictors?|features?|covariates?)\s+"
+    r"(?:was|were|is|are|did|does|had|has|showed|shows|predicted|predicts|"
+    r"associated|correlated|increased|decreased|remained)\b",
+    re.IGNORECASE,
+)
 _ENDPOINT_ALIASES: dict[str, set[str]] = {
     "mortality": {
         "mortality",
@@ -146,6 +154,26 @@ _TOKEN_STOPWORDS = {
     "patient", "group", "groups", "study", "analysis", "trial", "data", "results",
     "finding", "findings", "significant", "statistically", "reported", "observed",
     "followup",
+}
+_GENERIC_VARIABLE_ARTIFACTS = {
+    "these_variables",
+    "those_variables",
+    "these_factors",
+    "those_factors",
+    "this_factor",
+    "that_factor",
+    "this_variable",
+    "that_variable",
+    "this_predictor",
+    "that_predictor",
+    "these_predictors",
+    "those_predictors",
+    "the_variable",
+    "the_factor",
+    "the_predictor",
+    "variables",
+    "factors",
+    "predictors",
 }
 _RELATION_CLASSIFIER_SYSTEM = """\
 You compare two clinical findings about the same study.
@@ -197,6 +225,10 @@ def parse_human_report_text(
             continue
         if is_user_facing_nonfinding_artifact(cleaned):
             continue
+        if not is_user_facing_clinical_finding_eligible(cleaned):
+            continue
+        if _is_generic_variable_subject_claim(cleaned):
+            continue
 
         finding = _build_comparable_finding(
             finding_id=f"human_{len(findings) + 1}",
@@ -227,6 +259,7 @@ def build_comparison_report(
     qtrial_findings = [
         finding for finding in normalize_qtrial_findings(final_report)
         if not is_user_facing_nonfinding_artifact(finding)
+        and is_user_facing_clinical_finding_eligible(finding)
     ]
     known_variables = {finding.variable for finding in qtrial_findings if finding.variable}
     human_parse = parse_human_report_text(
@@ -238,6 +271,7 @@ def build_comparison_report(
         finding for finding in human_parse.findings
         if is_comparison_claim_type(finding.claim_type)
         and not is_user_facing_nonfinding_artifact(finding)
+        and is_user_facing_clinical_finding_eligible(finding)
     ]
     matches, qtrial_only, human_only = _match_findings(qtrial_findings, human_comparison_findings, provider)
     contradictions = [m for m in matches if m.relation == "contradict"]
@@ -279,6 +313,13 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
             if is_user_facing_nonfinding_artifact(finding) or is_raw_statistical_artifact_text(source_text):
                 continue
             finding_category = getattr(finding, "finding_category", "analytical")
+            inferred_category = classify_finding_category(
+                source_text,
+                variable=getattr(finding, "variable", None),
+                endpoint=getattr(finding, "endpoint", None),
+            )
+            if is_analytical_category(finding_category) and not is_analytical_category(inferred_category):
+                finding_category = inferred_category
             claim_type = getattr(
                 finding,
                 "claim_type",
@@ -288,6 +329,8 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                 ),
             )
             if not is_analytical_category(finding_category) or not is_comparison_claim_type(claim_type):
+                continue
+            if not is_user_facing_clinical_finding_eligible(finding):
                 continue
             evidence_score = 0.0
             evidence_label = "ungrounded"
@@ -342,7 +385,11 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                 or finding.get("finding_text")
                 or ""
             )
-            if is_user_facing_nonfinding_artifact(finding) or is_raw_statistical_artifact_text(candidate_text):
+            structured_payload = _has_structured_association_payload(finding)
+            if (
+                (is_user_facing_nonfinding_artifact(finding) or is_raw_statistical_artifact_text(candidate_text))
+                and not structured_payload
+            ):
                 continue
             variable = _canonicalize_variable_name(str(finding.get("finding_id", "")).strip() or None)
             endpoint_hint = (
@@ -358,6 +405,16 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                     analysis_type=str(finding.get("analysis_type") or "association"),
                 )
             )
+            if structured_payload and finding_category == "artifact_excluded":
+                finding_category = "analytical"
+            inferred_category = classify_finding_category(
+                candidate_text,
+                variable=variable,
+                endpoint=endpoint_hint,
+                analysis_type=str(finding.get("analysis_type") or "association"),
+            )
+            if is_analytical_category(finding_category) and not is_analytical_category(inferred_category):
+                finding_category = "analytical" if structured_payload and inferred_category == "artifact_excluded" else inferred_category
             claim_type = str(
                 finding.get("claim_type")
                 or classify_claim_type(
@@ -369,6 +426,8 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                     p_value=_safe_float(finding.get("adjusted_p_value") or finding.get("raw_p_value")),
                 )
             )
+            if not is_analytical_category(finding_category):
+                claim_type = classify_claim_type(candidate_text, finding_category=finding_category)
             if not is_analytical_category(finding_category) or not is_comparison_claim_type(claim_type):
                 continue
             if variable and (is_endpoint_like_variable(variable, endpoint_hint) or is_followup_time_variable(variable)):
@@ -396,6 +455,11 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
 
             final_p_value = _safe_float(adj_p if adj_p is not None else raw_p)
             raw_summary = "; ".join(summary_parts)
+            structured_sentence = _structured_finding_sentence(
+                variable=variable,
+                endpoint=endpoint_hint,
+                significant=_bool_or_none(finding.get("significant_after_correction")),
+            )
             direction = _infer_direction(
                 finding_text=raw_summary,
                 effect_size=odds_ratio if odds_ratio is not None else _safe_float(effect),
@@ -412,7 +476,7 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
                     comparison_claim_text=str(finding.get("comparison_claim_text") or "").strip() or None,
                     plain_text=plain_text or None,
                     finding_text=str(finding.get("finding_text") or "").strip() or None,
-                    raw_text=raw_text,
+                    raw_text=structured_sentence or raw_text,
                 ),
                 section="clinical_analysis",
                 finding_category=finding_category,
@@ -445,6 +509,8 @@ def normalize_qtrial_findings(final_report: FinalReportSchema) -> list[Comparabl
             )
             if is_user_facing_nonfinding_artifact(comparable):
                 continue
+            if not is_user_facing_clinical_finding_eligible(comparable):
+                continue
             _add_unique_finding(findings, seen_texts, comparable)
 
     return findings
@@ -455,8 +521,16 @@ def _match_findings(
     human_findings: list[ComparableFinding],
     provider: ProviderName,
 ) -> tuple[list[FindingMatch], list[ComparableFinding], list[ComparableFinding]]:
-    qtrial_findings = [finding for finding in qtrial_findings if not is_user_facing_nonfinding_artifact(finding)]
-    human_findings = [finding for finding in human_findings if not is_user_facing_nonfinding_artifact(finding)]
+    qtrial_findings = [
+        finding for finding in qtrial_findings
+        if not is_user_facing_nonfinding_artifact(finding)
+        and is_user_facing_clinical_finding_eligible(finding)
+    ]
+    human_findings = [
+        finding for finding in human_findings
+        if not is_user_facing_nonfinding_artifact(finding)
+        and is_user_facing_clinical_finding_eligible(finding)
+    ]
     if not qtrial_findings or not human_findings:
         return [], list(qtrial_findings), list(human_findings)
 
@@ -1234,6 +1308,8 @@ def _clean_candidate(text: str) -> str:
 def _is_finding_candidate(text: str) -> bool:
     if is_user_facing_nonfinding_artifact(text):
         return False
+    if _is_generic_variable_subject_claim(text):
+        return False
     if len(text) < 24:
         return False
     if len(text.split()) < 4:
@@ -1271,6 +1347,10 @@ def _is_finding_candidate(text: str) -> bool:
     return any(keyword in lowered for keyword in keywords)
 
 
+def _is_generic_variable_subject_claim(text: str) -> bool:
+    return bool(_GENERIC_VARIABLE_SUBJECT_RE.match(text))
+
+
 def _looks_like_section_header(text: str) -> bool:
     cleaned = text.strip().rstrip(":").lower()
     if cleaned in _SECTION_HEADERS:
@@ -1295,7 +1375,7 @@ def _looks_like_non_claim_heading(text: str) -> bool:
     ):
         return True
     if len(cleaned.split()) <= 8 and not re.search(
-        r"\b(was|were|is|are|had|has|show|shows|showed|associated|predicts|predicted|significant|differed|difference|increased|decreased|reduced|lowered|lowers|p\s*[=<>])\b",
+        r"\b(was|were|is|are|had|has|show|shows|showed|associated|correlated|predicts|predicted|significant|differed|difference|increased|decreased|reduced|lowered|lowers|p\s*[=<>])\b",
         lowered,
     ):
         if any(token in lowered for token in ("mortality", "survival", "endpoint", "ejection fraction", "analysis", "results")):
@@ -1864,6 +1944,8 @@ def _canonicalize_variable_name(value: str | None) -> str | None:
     if not cleaned:
         return None
     cleaned = re.sub(r"^the_", "", cleaned)
+    if cleaned in _GENERIC_VARIABLE_ARTIFACTS:
+        return None
     for suffix in (
         "_did_not_show",
         "_did_not_demonstrate",
@@ -1887,6 +1969,8 @@ def _canonicalize_variable_name(value: str | None) -> str | None:
             cleaned = cleaned[: -len(suffix)].strip("_")
             break
     if not cleaned:
+        return None
+    if cleaned in _GENERIC_VARIABLE_ARTIFACTS:
         return None
     for canonical, aliases in _VARIABLE_SYNONYMS.items():
         normalized_aliases = {alias.replace(" ", "_") for alias in aliases}
@@ -2055,6 +2139,41 @@ def _bool_or_none(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     return None
+
+
+def _has_structured_association_payload(finding: dict[str, Any]) -> bool:
+    if not isinstance(finding, dict):
+        return False
+    has_stat = any(
+        finding.get(key) is not None
+        for key in (
+            "adjusted_p_value",
+            "raw_p_value",
+            "p_value",
+            "effect_size",
+            "odds_ratio",
+            "significant_after_correction",
+            "significant",
+        )
+    )
+    return has_stat and bool(str(finding.get("finding_id") or finding.get("variable") or "").strip())
+
+
+def _structured_finding_sentence(
+    *,
+    variable: str | None,
+    endpoint: str | None,
+    significant: bool | None,
+) -> str | None:
+    if not variable:
+        return None
+    subject = variable.replace("_", " ").capitalize()
+    outcome = (endpoint or "the outcome").replace("_", " ")
+    if significant is False:
+        return f"{subject} was not significantly associated with {outcome}."
+    if significant is True:
+        return f"{subject} was significantly associated with {outcome}."
+    return f"{subject} was evaluated for association with {outcome}."
 
 
 def _bools_match(left: bool | None, right: bool | None) -> bool:

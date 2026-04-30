@@ -19,6 +19,7 @@ from qtrial_backend.agentic.finding_categories import (
     is_followup_time_variable,
     is_raw_stat_artifact_finding,
     is_raw_statistical_artifact_text,
+    is_user_facing_clinical_finding_eligible,
     is_user_facing_nonfinding_artifact,
 )
 from qtrial_backend.agentic.schemas import (
@@ -142,7 +143,10 @@ def _extract_candidates(
     known_columns = list(df.columns)
 
     for idx, text in enumerate(_iter_claim_texts(analyst_report_text), start=1):
-        if is_user_facing_nonfinding_artifact(text) or is_raw_statistical_artifact_text(text):
+        if (
+            is_user_facing_nonfinding_artifact(text)
+            or is_raw_statistical_artifact_text(text)
+        ):
             continue
         candidates.append(
             _build_candidate(
@@ -160,7 +164,12 @@ def _extract_candidates(
         text = _finding_text(finding)
         if not text:
             continue
-        if is_user_facing_nonfinding_artifact(finding) or is_user_facing_nonfinding_artifact(text) or is_raw_statistical_artifact_text(text):
+        if (
+            is_user_facing_nonfinding_artifact(finding)
+            or is_user_facing_nonfinding_artifact(text)
+            or is_raw_statistical_artifact_text(text)
+            or not is_user_facing_clinical_finding_eligible(finding)
+        ):
             continue
         candidates.append(
             _build_candidate(
@@ -622,6 +631,12 @@ def _label_from_significance(
         return "partial", f"Recomputed p={p_value:.6g}; claim did not clearly state significance."
     if claimed != recomputed_significant:
         return "contradicted", f"Claim significance={claimed}; recomputed significance={recomputed_significant} (p={p_value:.6g})."
+
+    if claimed is False and recomputed_significant is False:
+        if candidate.reported_p_value is not None and not _reported_p_value_matches(candidate, p_value):
+            op = candidate.reported_p_operator or "="
+            return "partial", f"Null conclusion agrees, but reported p{op}{candidate.reported_p_value:.6g} is not reproduced by recomputed p={p_value:.6g}."
+        return "verified", f"Null finding agrees with recomputed non-significant result (p={p_value:.6g})."
 
     claimed_direction = candidate.direction if candidate.direction in {"positive", "negative"} else None
     if claimed_direction:

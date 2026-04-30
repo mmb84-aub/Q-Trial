@@ -84,11 +84,11 @@ def test_qc_findings_remain_visible_in_grounded_findings(monkeypatch) -> None:
     )
 
     findings = report.grounded_findings.findings  # type: ignore[union-attr]
-    assert len(findings) == 2
-    assert any(f.finding_category == "analytical" for f in findings)
-    assert any(f.finding_category == "data_quality" for f in findings)
-    qc = next(f for f in findings if f.finding_category == "data_quality")
-    assert qc.grounding_status == "Data Quality Note"
+    assert len(findings) == 1
+    assert not any(f.finding_category == "analytical" for f in findings)
+    assert any(f.finding_category in {"data_quality", "statistical_note"} for f in findings)
+    qc = next(f for f in findings if f.finding_category in {"data_quality", "statistical_note"})
+    assert qc.grounding_status in {"Data Quality Note", "QC Observation"}
 
 
 def test_final_report_sanitizer_removes_raw_chi_square_from_primary_analytical_outputs() -> None:
@@ -194,3 +194,117 @@ def test_final_report_sanitizer_removes_raw_chi_square_from_primary_analytical_o
     assert len(corrected) == 1
     assert corrected[0]["finding_id"] == "platelets"
     assert excluded[0]["finding_id"] == "smoking"
+
+
+def test_final_report_sanitizer_drops_malformed_and_demotes_contextual_findings() -> None:
+    report = FinalReportSchema(
+        provider="gemini",
+        model="test-model",
+        plan=PlanSchema(
+            dataset_summary="Test dataset",
+            steps=[
+                PlanStep(
+                    step_number=1,
+                    name="Stub",
+                    goal="Stub",
+                    inputs_used=["dataframe"],
+                    expected_output_keys=["analysis_report"],
+                    agent_to_call="DataQualityAgent",
+                )
+            ],
+        ),
+        agent_runs=[],
+        unknowns=UnknownsOutput(
+            ranked_unknowns=[],
+            explicit_assumptions=[],
+            required_documents=[],
+            summary="",
+        ),
+        final_insights=InsightSynthesisOutput(
+            key_findings=[
+                "Deaths occurred much earlier (median 44.5 days vs.",
+                "The dataset includes 8 predictor variables selected via QUBO feature selection.",
+                "Higher serum creatinine was associated with higher mortality risk.",
+            ],
+            risks_and_bias_signals=[],
+            recommended_next_analyses=[],
+            required_metadata_or_questions=[],
+        ),
+        grounded_findings=GroundedFindingsSchema(
+            findings=[
+                GroundedFinding(
+                    finding_text="Deaths occurred much earlier (median 44.5 days vs.",
+                    finding_text_plain="Deaths occurred much earlier (median 44.5 days vs.",
+                    finding_category="analytical",
+                    claim_type="association_claim",
+                    grounding_status="Supported",
+                ),
+                GroundedFinding(
+                    finding_text="The dataset includes 8 predictor variables selected via QUBO feature selection.",
+                    finding_text_plain="The dataset includes 8 predictor variables selected via QUBO feature selection.",
+                    finding_category="analytical",
+                    claim_type="association_claim",
+                    grounding_status="Supported",
+                ),
+                GroundedFinding(
+                    finding_text="Higher serum creatinine was associated with higher mortality risk.",
+                    finding_text_plain="Higher serum creatinine was associated with higher mortality risk.",
+                    finding_category="analytical",
+                    claim_type="association_claim",
+                    grounding_status="Supported",
+                ),
+                GroundedFinding(
+                    finding_text="- **Interpretation:** No association with mortality (41.7% diabetic in both groups).",
+                    finding_text_plain="- **Interpretation:** No association with mortality (41.7% diabetic in both groups).",
+                    finding_category="analytical",
+                    claim_type="association_claim",
+                    grounding_status="Supported",
+                ),
+                GroundedFinding(
+                    finding_text="**Event rate:** 32.1% (96 deaths out of 299 patients).",
+                    finding_text_plain="**Event rate:** 32.1% (96 deaths out of 299 patients).",
+                    finding_category="analytical",
+                    claim_type="association_claim",
+                    grounding_status="Supported",
+                ),
+            ]
+        ),
+        clinical_analysis={
+            "stage_3_corrections": {
+                "corrected_findings": [
+                    {
+                        "finding_id": "bad",
+                        "finding_text_plain": "1.18 mg/dL (p<0.001, adjusted p=0.00014)",
+                        "finding_category": "analytical",
+                    },
+                    {
+                        "finding_id": "qubo",
+                        "finding_text_plain": "The dataset includes 8 predictor variables selected via QUBO feature selection.",
+                        "finding_category": "analytical",
+                    },
+                ]
+            }
+        },
+    )
+
+    sanitized = _sanitize_final_report(report)
+
+    assert sanitized.final_insights.key_findings == [
+        "Higher serum creatinine was associated with higher mortality risk."
+    ]
+    grounded_texts = [finding.finding_text for finding in sanitized.grounded_findings.findings]
+    assert "Deaths occurred much earlier (median 44.5 days vs." not in grounded_texts
+    assert "- **Interpretation:** No association with mortality (41.7% diabetic in both groups)." not in grounded_texts
+    assert "**Event rate:** 32.1% (96 deaths out of 299 patients)." not in grounded_texts
+    qubo = next(f for f in sanitized.grounded_findings.findings if "QUBO" in f.finding_text)
+    assert qubo.finding_category == "preprocessing"
+    assert qubo.grounding_status == "Preprocessing Observation"
+    corrected = sanitized.clinical_analysis["stage_3_corrections"]["corrected_findings"]
+    assert corrected == [
+        {
+            "finding_id": "qubo",
+            "finding_text_plain": "The dataset includes 8 predictor variables selected via QUBO feature selection.",
+            "finding_category": "preprocessing",
+            "claim_type": "metadata_claim",
+        }
+    ]

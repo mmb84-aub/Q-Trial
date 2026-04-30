@@ -163,6 +163,26 @@ def test_contradicted_significance_claim() -> None:
     assert report.metrics.contradiction_rate == 1.0
 
 
+def test_null_finding_is_verified_without_direction_contradiction() -> None:
+    df = pd.DataFrame(
+        {
+            "age": [50, 52, 54, 56, 58, 60, 62, 64, 66, 68],
+            "DEATH_EVENT": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+        }
+    )
+
+    report = build_statistical_verification_report(
+        df=df,
+        qtrial_findings=[],
+        analyst_report_text="Higher age was not significantly associated with DEATH_EVENT.",
+    )
+
+    claim = report.claims[0]
+    assert claim.label == "verified"
+    assert claim.recomputed_p_value is not None
+    assert claim.recomputed_p_value >= 0.05
+
+
 def test_vague_clinical_claim_is_not_verifiable() -> None:
     df = pd.DataFrame(
         {

@@ -68,10 +68,15 @@ _EVENT_HINTS = re.compile(
 
 def _detect_treatment_col(df: pd.DataFrame) -> str | None:
     for col in df.columns:
+        # Avoid misclassifying endpoints as treatment.
+        if _EVENT_HINTS.search(col):
+            continue
         if _TREATMENT_HINTS.search(col) and 2 <= df[col].nunique() <= 6:
             return col
     # Fallback: any binary-ish column with 2-3 unique values
     for col in df.columns:
+        if _EVENT_HINTS.search(col):
+            continue
         if 2 <= df[col].nunique() <= 3:
             return col
     return None
@@ -382,7 +387,15 @@ def _section_baseline_balance(ctx: AgentContext, treatment_col: str) -> str:
     df = ctx.dataframe
     baseline_cols = [c for c in df.columns if c != treatment_col]
 
-    lines = [f"## 7. Baseline Balance (treatment = `{treatment_col}`)", ""]
+    # This section is used both for true treatment-arm comparisons and for
+    # outcome-stratified comparisons when only an endpoint column is available.
+    label = "Baseline Balance"
+    normalized = re.sub(r"[^a-z0-9]+", "", (treatment_col or "").lower())
+    if _EVENT_HINTS.search(treatment_col) or normalized in {"deathevent", "mortality", "death", "outcome"}:
+        label = f"Baseline Differences by Outcome Group (`{treatment_col}`)"
+    else:
+        label = f"Baseline Balance by Group (`{treatment_col}`)"
+    lines = [f"## 7. {label}", ""]
 
     r = _call(
         baseline_balance,
@@ -995,9 +1008,12 @@ def build_static_report(
     )
 
     # Auto-detect clinical structure
-    treatment_col = _detect_treatment_col(df)
     time_col = _detect_time_col(df)
     event_col = _detect_event_col(df, time_col) if time_col else None
+    treatment_col = _detect_treatment_col(df)
+    if treatment_col and event_col and treatment_col == event_col:
+        # Never call the endpoint a treatment arm.
+        treatment_col = None
 
     _det = []
     if treatment_col: _det.append(f"treatment=[bold]{treatment_col}[/bold]")

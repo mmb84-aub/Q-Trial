@@ -1,7 +1,9 @@
 from qtrial_backend.agentic.finding_categories import (
     classify_claim_type,
     classify_finding_category,
+    is_user_facing_clinical_finding_eligible,
     is_non_finding_header_artifact,
+    is_malformed_finding_fragment,
     is_raw_stat_artifact_finding,
     is_user_facing_nonfinding_artifact,
     neutral_status_for_category,
@@ -142,6 +144,64 @@ def test_real_clinical_findings_are_not_header_artifacts() -> None:
     assert not is_non_finding_header_artifact("Higher ejection fraction was associated with lower mortality risk.")
     assert not is_non_finding_header_artifact("Platelets did not show statistically significant association with mortality.")
     assert not is_non_finding_header_artifact("Smoking was not significantly associated with mortality.")
+
+
+def test_malformed_fragments_are_user_facing_artifacts() -> None:
+    assert is_malformed_finding_fragment("Deaths occurred much earlier (median 44.5 days vs.")
+    assert is_malformed_finding_fragment("1.18 mg/dL (p<0.001, adjusted p=0.00014)")
+    assert is_malformed_finding_fragment("Compared with the control group,")
+    assert is_user_facing_nonfinding_artifact("Deaths occurred much earlier (median 44.5 days vs.")
+
+
+def test_real_clinical_findings_are_not_malformed_fragments() -> None:
+    assert not is_malformed_finding_fragment("Higher serum creatinine was associated with higher mortality risk.")
+    assert not is_malformed_finding_fragment("Platelets did not show statistically significant association with mortality.")
+
+
+def test_metadata_and_qc_context_are_demoted_from_analytical() -> None:
+    assert (
+        classify_finding_category("The dataset includes 8 predictor variables selected via QUBO feature selection.")
+        == "preprocessing"
+    )
+    assert (
+        classify_finding_category("All continuous variables rejected normality (p<0.001).")
+        == "statistical_note"
+    )
+    assert classify_finding_category("The study design was retrospective observational.") == "qc_note"
+
+
+def test_strict_clinical_finding_eligibility_rejects_fragments_wrappers_and_context() -> None:
+    assert not is_user_facing_clinical_finding_eligible(
+        "1.18 mg/dL, 56% increase), indicating renal dysfunction is strongly associated with mortality."
+    )
+    assert not is_user_facing_clinical_finding_eligible(
+        "- **Interpretation:** No association with mortality (41.7% diabetic in both groups)."
+    )
+    assert not is_user_facing_clinical_finding_eligible(
+        "**Event rate:** 32.1% (96 deaths out of 299 patients)."
+    )
+    assert not is_user_facing_clinical_finding_eligible("Primary analysis results:")
+    assert not is_user_facing_clinical_finding_eligible("Characteristics by survival status:")
+    assert not is_user_facing_clinical_finding_eligible("Prevalence of risk factors:")
+    assert not is_user_facing_clinical_finding_eligible("Independent predictors:")
+
+
+def test_strict_clinical_finding_eligibility_keeps_standalone_findings() -> None:
+    assert is_user_facing_clinical_finding_eligible(
+        "Serum creatinine was higher in patients who died (1.84 vs 1.18 mg/dL, p<0.001)."
+    )
+    assert is_user_facing_clinical_finding_eligible(
+        "Higher serum creatinine was associated with higher mortality."
+    )
+    assert is_user_facing_clinical_finding_eligible(
+        "Higher ejection fraction was associated with lower mortality."
+    )
+    assert is_user_facing_clinical_finding_eligible(
+        "Smoking was not significantly associated with mortality."
+    )
+    assert is_user_facing_clinical_finding_eligible(
+        "Platelets did not show a statistically significant association with mortality."
+    )
 
 
 def test_survival_primary_is_not_analytical_category() -> None:
