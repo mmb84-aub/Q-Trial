@@ -9,10 +9,12 @@ export function FindingsList({ findings }: Props) {
   if (findings.length === 0) return null;
 
   const analyticalFindings = findings.filter((finding) =>
-    ["analytical", "clinical_association", "negative_association", undefined].includes(finding.finding_category),
+    ["analytical", "clinical_association", "negative_association", undefined].includes(finding.finding_category)
+      && !isRawStatisticalArtifact(finding),
   );
   const qcFindings = findings.filter((finding) =>
-    !["analytical", "clinical_association", "negative_association", undefined].includes(finding.finding_category),
+    !["analytical", "clinical_association", "negative_association", undefined].includes(finding.finding_category)
+      || isRawStatisticalArtifact(finding),
   );
 
   return (
@@ -45,4 +47,10 @@ export function FindingsList({ findings }: Props) {
       )}
     </section>
   );
+}
+
+function isRawStatisticalArtifact(finding: GroundedFinding): boolean {
+  const text = `${finding.finding_text_plain ?? ""} ${finding.finding_text_raw ?? ""} ${finding.finding_text ?? ""}`;
+  return /^\s*`?[a-z][a-z0-9_\s-]{1,60}`?\s*[:;,-]\s*.*(?:χ²|χ2|chi\s*-?\s*square|chi2)\s*[=:]/i.test(text)
+    && !/(associated with|not associated|not significantly associated|was significantly associated|were significantly associated)/i.test(text);
 }

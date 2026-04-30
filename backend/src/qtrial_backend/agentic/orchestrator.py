@@ -38,6 +38,9 @@ from qtrial_backend.agentic.finding_categories import (
     classify_finding_category,
     is_analytical_category,
     is_methodology_instruction_text,
+    is_raw_stat_artifact_finding,
+    is_raw_statistical_artifact_text,
+    is_user_facing_nonfinding_artifact,
     neutral_status_for_category,
 )
 from qtrial_backend.agentic.finding_comparison_normalizer import normalize_comparison_claims
@@ -399,6 +402,146 @@ def _build_qc_finding(text: str, category: str) -> GroundedFinding:
     )
 
 
+def _sanitize_clinical_analysis(clinical_analysis: dict | None) -> dict | None:
+    """Final backend gate: raw stat artifacts cannot remain primary findings."""
+    if not isinstance(clinical_analysis, dict):
+        return clinical_analysis
+    sanitized = dict(clinical_analysis)
+    stage_3 = sanitized.get("stage_3_corrections")
+    if not isinstance(stage_3, dict):
+        return sanitized
+
+    corrected = stage_3.get("corrected_findings")
+    if not isinstance(corrected, list):
+        return sanitized
+
+    clean_findings: list[Any] = []
+    excluded: list[Any] = list(stage_3.get("artifact_excluded_findings") or [])
+    for finding in corrected:
+        if is_user_facing_nonfinding_artifact(finding):
+            excluded.append(_artifact_excluded_payload(finding))
+            continue
+        clean_findings.append(finding)
+
+    updated_stage_3 = dict(stage_3)
+    updated_stage_3["corrected_findings"] = clean_findings
+    if excluded:
+        updated_stage_3["artifact_excluded_findings"] = excluded
+    sanitized["stage_3_corrections"] = updated_stage_3
+    return sanitized
+
+
+def _sanitize_grounded_findings_schema(
+    grounded_findings: GroundedFindingsSchema | None,
+) -> GroundedFindingsSchema | None:
+    if grounded_findings is None:
+        return None
+    sanitized_findings: list[GroundedFinding] = []
+    seen: set[str] = set()
+    for finding in grounded_findings.findings:
+        if is_user_facing_nonfinding_artifact(finding):
+            text = _finding_display_text(finding)
+            category = "statistical_note"
+            qc_finding = finding.model_copy(
+                update={
+                    "finding_text": text,
+                    "finding_text_plain": text,
+                    "finding_text_raw": text,
+                    "finding_category": category,
+                    "claim_type": classify_claim_type(text, finding_category=category),
+                    "grounding_status": neutral_status_for_category(category),
+                    "literature_skipped": True,
+                    "literature_skip_note": (
+                        "Raw variable-only statistical artifact excluded from primary "
+                        "analytical findings and retained only as a statistical note."
+                    ),
+                }
+            )
+            key = f"artifact:{text.lower()}"
+            if key not in seen:
+                seen.add(key)
+                sanitized_findings.append(qc_finding)
+            continue
+        key = _finding_display_text(finding).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        sanitized_findings.append(finding)
+    return grounded_findings.model_copy(update={"findings": sanitized_findings})
+
+
+def _sanitize_analytical_grounded_findings(
+    grounded_findings: list[GroundedFinding],
+) -> list[GroundedFinding]:
+    return [finding for finding in grounded_findings if not is_user_facing_nonfinding_artifact(finding)]
+
+
+def _sanitize_final_report(report: FinalReportSchema) -> FinalReportSchema:
+    """Final user-facing report sanitation boundary."""
+    clinical_analysis = _sanitize_clinical_analysis(report.clinical_analysis)
+    grounded_findings = _sanitize_grounded_findings_schema(report.grounded_findings)
+    final_insights = report.final_insights
+    if final_insights is not None:
+        final_insights = final_insights.model_copy(
+            update={
+                "key_findings": [
+                    text for text in final_insights.key_findings
+                    if not is_user_facing_nonfinding_artifact(text)
+                ],
+                "risks_and_bias_signals": [
+                    text for text in final_insights.risks_and_bias_signals
+                    if not is_user_facing_nonfinding_artifact(text)
+                ],
+            }
+        )
+    return report.model_copy(
+        update={
+            "clinical_analysis": clinical_analysis,
+            "grounded_findings": grounded_findings,
+            "final_insights": final_insights,
+        }
+    )
+
+
+def _artifact_excluded_payload(finding: Any) -> dict[str, Any]:
+    if isinstance(finding, dict):
+        payload = dict(finding)
+    else:
+        payload = {"finding_text": _finding_display_text(finding)}
+    payload["finding_category"] = "statistical_note"
+    payload["claim_type"] = "statistical_note"
+    payload["artifact_exclusion_reason"] = (
+        "Non-finding statistical artifact excluded from primary analytical findings."
+    )
+    return payload
+
+
+def _finding_display_text(finding: Any) -> str:
+    if isinstance(finding, str):
+        return finding.strip()
+    fields = (
+        "comparison_claim_text",
+        "finding_text_plain",
+        "finding_text",
+        "source_finding_plain",
+        "source_finding",
+        "source_text",
+        "finding_text_raw",
+        "raw",
+    )
+    if isinstance(finding, dict):
+        for field in fields:
+            value = finding.get(field)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    for field in fields:
+        value = getattr(finding, field, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def run_agentic_insights(
@@ -518,8 +661,11 @@ def run_agentic_insights(
             stage_3 = dict(clinical_analysis.get("stage_3_corrections", {}))
             stage_3["corrected_findings"] = normalized_for_comparison
             clinical_analysis["stage_3_corrections"] = stage_3
+            clinical_analysis = _sanitize_clinical_analysis(clinical_analysis)
         except Exception as exc:
             console.print(f"[yellow]⚠ Statistical finding verbalization skipped: {exc}[/yellow]")
+
+    clinical_analysis = _sanitize_clinical_analysis(clinical_analysis)
 
     if study_context and analysis_report:
         try:
@@ -549,6 +695,8 @@ def run_agentic_insights(
                     if not plain_text and not raw_text:
                         continue
                     best_text = plain_text or raw_text
+                    if is_user_facing_nonfinding_artifact(finding) or is_raw_statistical_artifact_text(best_text):
+                        category = "statistical_note"
                     if not is_analytical_category(category):
                         if best_text.lower() not in seen_qc_texts:
                             seen_qc_texts.add(best_text.lower())
@@ -602,6 +750,11 @@ def run_agentic_insights(
                         continue
                     if is_methodology_instruction_text(s):
                         continue
+                    if is_user_facing_nonfinding_artifact(s) or is_raw_statistical_artifact_text(s):
+                        if s.lower() not in seen_qc_texts:
+                            seen_qc_texts.add(s.lower())
+                            supplemental_qc_findings.append(_build_qc_finding(s, "statistical_note"))
+                        continue
                     if _stat_pattern.search(s):
                         category = classify_finding_category(s)
                         if is_analytical_category(category):
@@ -619,6 +772,10 @@ def run_agentic_insights(
                             seen_qc_texts.add(s.lower())
                             supplemental_qc_findings.append(_build_qc_finding(s, category))
 
+            findings_for_cst = [
+                finding for finding in findings_for_cst
+                if not is_user_facing_nonfinding_artifact(finding)
+            ]
             csts = translate_findings_to_cst(findings_for_cst, study_context, provider)
             _repro.add_csts(csts)
             _emit("stage_complete", "cst_translation", f"Translated {len(csts)} findings to search terms")
@@ -627,7 +784,7 @@ def run_agentic_insights(
             # ── Step 6: Literature Validator (API calls) ──────────────────────
             console.print("[bold cyan]► Step 6:[/bold cyan] Literature validation…")
             lit_pipeline = LiteratureValidatorPipeline(provider=provider)
-            analytical_grounded_findings = lit_pipeline.validate(csts)
+            analytical_grounded_findings = _sanitize_analytical_grounded_findings(lit_pipeline.validate(csts))
             grounded_findings_list = analytical_grounded_findings + supplemental_qc_findings
             _repro.add_literature_queries(lit_pipeline.query_records)
             _emit(
@@ -691,6 +848,7 @@ def run_agentic_insights(
                     if d.action == "listwise_deletion" and d.missingness_rate > 0
                 ],
             )
+            grounded_findings_schema = _sanitize_grounded_findings_schema(grounded_findings_schema)
 
         except Exception as exc:
             console.print(f"  [yellow]⚠ Steps 5-7 failed: {exc}[/yellow]")
@@ -706,6 +864,7 @@ def run_agentic_insights(
         evidence=evidence,
         tool_log=typed_tool_log,
     )
+    grounded_findings_schema = _sanitize_grounded_findings_schema(grounded_findings_schema)
 
     # ── Reproducibility log ───────────────────────────────────────────────────
     repro_log = _repro.finalise(synthesis_quality_score=synthesis_quality)
@@ -714,6 +873,7 @@ def run_agentic_insights(
     # Build a minimal InsightSynthesisOutput from grounded findings for
     # backward-compat fields that the frontend may still read.
     from qtrial_backend.agentic.schemas import InsightSynthesisOutput, RankedAnalysis, PlanSchema, PlanStep, AgentRunRecord
+    analytical_grounded_findings = _sanitize_analytical_grounded_findings(analytical_grounded_findings)
     _final_insights = InsightSynthesisOutput(
         key_findings=[gf.finding_text for gf in analytical_grounded_findings],
         risks_and_bias_signals=[
@@ -792,9 +952,11 @@ def run_agentic_insights(
         statistical_verification_report=statistical_verification_report,
         comparison_report=None,
     )
+    report = _sanitize_final_report(report)
 
     if analyst_report_text and analyst_report_name:
         try:
+            report = _sanitize_final_report(report)
             report = report.model_copy(
                 update={
                     "statistical_verification_report": build_statistical_verification_report(
@@ -807,10 +969,12 @@ def run_agentic_insights(
                     )
                 }
             )
+            report = _sanitize_final_report(report)
         except Exception as exc:
             console.print(f"[yellow]⚠ Statistical verification skipped: {exc}[/yellow]")
 
         try:
+            report = _sanitize_final_report(report)
             report = report.model_copy(
                 update={
                     "comparison_report": build_comparison_report(
@@ -821,10 +985,12 @@ def run_agentic_insights(
                     )
                 }
             )
+            report = _sanitize_final_report(report)
             _emit("stage_complete", "comparison", "Automated report comparison complete")
         except Exception as exc:
             console.print(f"[yellow]⚠ Comparison skipped: {exc}[/yellow]")
 
+    report = _sanitize_final_report(report)
     report_dict = report.model_dump()
     if typed_tool_log is not None:
         report_dict["tool_log"] = _compact_tool_log_for_persistence(typed_tool_log)

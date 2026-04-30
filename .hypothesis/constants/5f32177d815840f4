@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/literature/evidence_strength.py
+# hypothesis_version: 6.151.9
+
+[100, 1000, 10000, ',', 'Insufficient', 'Moderate', 'RCT', 'Strong', 'Weak', 'an unknown number of', 'case study', 'cohort', 'meta-analysis', 'observational', 'unknown']

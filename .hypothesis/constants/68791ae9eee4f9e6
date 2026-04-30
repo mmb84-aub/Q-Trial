@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/outlier_detection.py
+# hypothesis_version: 6.151.9
+
+[0.25, 0.6745, 0.75, 1.5, 3.0, 100, 'columns_analysed', 'error', 'example_indices', 'iqr_method', 'iqr_multiplier', 'lower_fence', 'mad_method', 'mad_value', 'max', 'min', 'n', 'n_non_null', 'n_outliers', 'number', 'outlier_detection', 'pct_outliers', 'results', 'skipped', 'stats', 'threshold', 'upper_fence', 'zscore_method', 'zscore_threshold']

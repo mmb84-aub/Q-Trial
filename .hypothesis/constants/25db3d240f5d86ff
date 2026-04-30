@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/type_coercion.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.05, 0.8, 0.9, 1.0, '^\\d{2}-\\d{2}-\\d{4}$', '^\\d{2}/\\d{2}/\\d{4}$', '^\\d{4}-\\d{2}-\\d{2}$', '^\\d{4}/\\d{2}/\\d{2}$', 'coerce', 'column', 'convert_to_datetime', 'convert_to_numeric', 'current_dtype', 'float', 'int', 'may_be_identifier', 'n_columns_scanned', 'n_flagged', 'n_would_fail', 'object', 'reason', 'stats', 'suggestion', 'suggestions', 'unique_values']

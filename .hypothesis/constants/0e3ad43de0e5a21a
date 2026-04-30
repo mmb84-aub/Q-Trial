@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/report/adl.py
+# hypothesis_version: 6.151.9
+
+['### Consequences', '### Context', '### Decision', '---', 'ADL-001', 'ADL-002', 'ADL-003', 'ADL-004', 'ADL-005', 'ADL-006', 'ADL-007', 'ADL-008', 'ADL-009', 'Accepted', 'alternatives', 'consequences', 'context', 'decision', 'id', 'references', 'status', 'title']

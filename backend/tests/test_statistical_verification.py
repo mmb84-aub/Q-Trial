@@ -103,6 +103,44 @@ def test_verified_binary_association_claim() -> None:
     assert report.metrics.verification_rate == 1.0
 
 
+def test_raw_chi_square_artifact_is_not_extracted_for_verification() -> None:
+    df = pd.DataFrame(
+        {
+            "platelets": [100, 110, 120, 130],
+            "DEATH_EVENT": [0, 0, 1, 1],
+        }
+    )
+
+    report = build_statistical_verification_report(
+        df=df,
+        qtrial_findings=[],
+        analyst_report_text="platelets: χ²=2232.8060, p=0.0000",
+        analyst_report_name="analyst.txt",
+    )
+
+    assert report.claims == []
+    assert report.metrics.total_claims == 0
+
+
+def test_header_wrapper_is_not_extracted_for_verification() -> None:
+    df = pd.DataFrame(
+        {
+            "age": [50, 60, 70, 80],
+            "DEATH_EVENT": [0, 0, 1, 1],
+        }
+    )
+
+    report = build_statistical_verification_report(
+        df=df,
+        qtrial_findings=[],
+        analyst_report_text="Hazard Ratios (HR with 95% CI):\nTest_Selection_Rationale:",
+        analyst_report_name="analyst.txt",
+    )
+
+    assert report.claims == []
+    assert report.metrics.total_claims == 0
+
+
 def test_contradicted_significance_claim() -> None:
     df = pd.DataFrame(
         {

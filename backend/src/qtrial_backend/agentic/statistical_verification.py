@@ -14,7 +14,13 @@ from typing import Any
 import pandas as pd
 
 from qtrial_backend.agent.context import AgentContext
-from qtrial_backend.agentic.finding_categories import is_endpoint_like_variable, is_followup_time_variable
+from qtrial_backend.agentic.finding_categories import (
+    is_endpoint_like_variable,
+    is_followup_time_variable,
+    is_raw_stat_artifact_finding,
+    is_raw_statistical_artifact_text,
+    is_user_facing_nonfinding_artifact,
+)
 from qtrial_backend.agentic.schemas import (
     StatisticalVerificationMetrics,
     StatisticalVerificationReport,
@@ -136,6 +142,8 @@ def _extract_candidates(
     known_columns = list(df.columns)
 
     for idx, text in enumerate(_iter_claim_texts(analyst_report_text), start=1):
+        if is_user_facing_nonfinding_artifact(text) or is_raw_statistical_artifact_text(text):
+            continue
         candidates.append(
             _build_candidate(
                 claim_id=f"analyst_{idx}",
@@ -151,6 +159,8 @@ def _extract_candidates(
     for idx, finding in enumerate(qtrial_findings or [], start=1):
         text = _finding_text(finding)
         if not text:
+            continue
+        if is_user_facing_nonfinding_artifact(finding) or is_user_facing_nonfinding_artifact(text) or is_raw_statistical_artifact_text(text):
             continue
         candidates.append(
             _build_candidate(

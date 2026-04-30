@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/providers/gemini_client.py
+# hypothesis_version: 6.151.9
+
+[2.0, 10.0, 120.0, '429', 'FreeTier', 'RESOURCE_EXHAUSTED', 'assistant', 'emit', 'end_turn', 'function_call', 'gemini', 'key_rotation', 'message', 'model', 'progress', 'rate_limit', 'result', 'stage', 'system_instruction', 'text', 'tool', 'tool_use', 'tools', 'type', 'user']

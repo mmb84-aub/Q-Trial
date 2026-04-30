@@ -16,6 +16,7 @@ import pandas as pd
 from rich.console import Console
 
 from qtrial_backend.agent.context import AgentContext
+from qtrial_backend.agentic.finding_categories import is_user_facing_nonfinding_artifact
 
 console = Console()
 
@@ -883,7 +884,10 @@ def _section_clinical_analysis(result: dict) -> str:
     lines.append(f"- Hierarchical gate open: **{s3.get('hierarchical_gate_open', 'N/A')}**")
     lines.append("")
 
-    findings = s3.get("corrected_findings", [])
+    findings = [
+        finding for finding in s3.get("corrected_findings", [])
+        if not is_user_facing_nonfinding_artifact(finding)
+    ]
     if findings:
         header = ["Endpoint", "Type", "Raw p", "Adjusted p", "Method", "Effect size", "OR",
                   "95% CI", "Power", "Req. n (80%)", "Significant"]

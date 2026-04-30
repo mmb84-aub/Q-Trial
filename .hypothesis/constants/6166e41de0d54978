@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/rag/chunking.py
+# hypothesis_version: 6.151.9
+
+[512, '(?<=[.!?])\\s+', 'chunking_strategy', 'fixed', 'paragraph', 'sentence', 'source_name', 'source_type']

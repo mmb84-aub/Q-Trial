@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/dataset/preview.py
+# hypothesis_version: 6.151.9
+
+[100.0, '25%', '50%', '75%', 'cols', 'count', 'head', 'max', 'mean', 'min', 'missingness_pct', 'notes', 'number', 'numeric_summary', 'records', 'rows', 'schema', 'shape', 'std', 'truncated_cols', 'truncated_rows']

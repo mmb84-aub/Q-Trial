@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/survival.py
+# hypothesis_version: 6.151.9
+
+[0.05, 100, 365, 730, 1095, 1825, '_event', '_kmf', 'coerce', 'event_column', 'event_rate_pct', 'groups', 'listwise_deletion', 'logrank_error', 'logrank_p_value', 'logrank_significant', 'median_survival', 'n', 'n_before_dropna', 'n_censored', 'n_events', 'n_total', 'note', 'overall', 'rows_dropped', 'rows_dropped_missing', 'stats', 'survival_analysis', 'time_column', 'total_rows_dropped']

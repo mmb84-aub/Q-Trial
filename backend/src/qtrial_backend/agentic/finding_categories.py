@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
 
 FindingCategory = Literal[
@@ -219,9 +219,69 @@ _FOLLOW_UP_PATTERNS = (
 )
 
 _RAW_STAT_ARTIFACT_RE = re.compile(
-    r"^\s*`?[a-z][a-z0-9_\s-]{1,60}`?\s*[:;,-]\s*"
-    r".*(?:χ²|χ2|chi\s*-?\s*square|chi2)\s*[=:]",
+    r"^\s*(?:[-*•]|\d+[.)])?\s*"
+    r"`?[a-z][a-z0-9_\s.-]{0,80}`?\s*(?::|;|,|-)?\s*"
+    r"(?:χ\s*[²2]|chi\s*-?\s*square|chi2|x\s*\^?\s*2)\s*[=:]?\s*"
+    r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
+    r".*\bp\s*(?:=|<|>|<=|>=|≤|≥)\s*"
+    r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?",
     re.IGNORECASE,
+)
+_RAW_STAT_ARTIFACT_TEXT_FIELDS = (
+    "comparison_claim_text",
+    "finding_text_plain",
+    "finding_text",
+    "source_finding_plain",
+    "source_finding",
+    "source_text",
+    "plain",
+    "finding_text_raw",
+    "source_finding_raw",
+    "raw",
+)
+_PRIMARY_ARTIFACT_TEXT_FIELDS = (
+    "comparison_claim_text",
+    "finding_text_plain",
+    "finding_text",
+    "source_finding_plain",
+    "source_finding",
+    "source_text",
+    "plain",
+)
+_CLINICAL_INTERPRETATION_PHRASES = (
+    "associated with",
+    "not associated",
+    "not significantly associated",
+    "did not show",
+    "showed no",
+    "was significantly associated",
+    "were significantly associated",
+    "predict",
+    "predictor",
+    "higher",
+    "lower",
+    "increased risk",
+    "decreased risk",
+    "mortality risk",
+    "survival",
+)
+_NON_FINDING_HEADER_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:[-*•]\s*)?"
+    r"(?:\*\*|__)?\s*"
+    r"(?:"
+    r"hazard\s+ratios?|odds\s+ratios?|risk\s+ratios?|effect\s+sizes?|"
+    r"test[_\s-]*selection[_\s-]*rationale|follow[-\s]*up|binary\s+outcome|"
+    r"columns?|imputation|median\s+survival|continuous\s+variables?|"
+    r"categorical\s+variables?|cox\s+regression|logistic\s+regression|"
+    r"model\s+summary|statistical\s+notes?|analytical\s+findings|"
+    r"data\s+quality(?:\s+notes?)?|results?|methods?|summary"
+    r")"
+    r"(?:\s*\([^)]*\))?\s*(?:\*\*|__)?\s*:?\s*$",
+    re.IGNORECASE,
+)
+_NON_FINDING_WRAPPER_PHRASES = (
+    "all continuous variables are non-normal",
+    "all continuous variables are non normal",
 )
 
 _METADATA_PATTERNS = (
@@ -264,6 +324,134 @@ def is_methodology_instruction_text(text: str) -> bool:
     return any(re.search(pattern, lowered) for pattern in _METHODOLOGY_INSTRUCTION_PATTERNS)
 
 
+def is_raw_statistical_artifact_text(text: str) -> bool:
+    lowered = " ".join((text or "").lower().split())
+    if not _RAW_STAT_ARTIFACT_RE.search(text or ""):
+        return False
+    return not any(phrase in lowered for phrase in _CLINICAL_INTERPRETATION_PHRASES)
+
+
+def is_raw_stat_artifact_finding(finding: Any) -> bool:
+    """Hard final gate for raw variable-only statistical artifact findings.
+
+    This intentionally ignores an upstream analytical category. A finding is
+    excluded only when its user-facing text is a raw variable/test-statistic line
+    such as "`time`: χ²=38.49, p=0.0000". Legitimate interpreted sentences such
+    as "Smoking was not significantly associated with mortality" are preserved.
+    """
+    if isinstance(finding, str):
+        return is_raw_statistical_artifact_text(finding)
+
+    primary_text = _first_text_field(finding, _PRIMARY_ARTIFACT_TEXT_FIELDS)
+    if primary_text:
+        return is_raw_statistical_artifact_text(primary_text)
+
+    return any(
+        is_raw_statistical_artifact_text(text)
+        for text in _iter_text_fields(finding, _RAW_STAT_ARTIFACT_TEXT_FIELDS)
+    )
+
+
+def is_non_finding_header_artifact_text(text: str) -> bool:
+    cleaned = _clean_header_candidate(text)
+    if not cleaned:
+        return True
+    lowered = cleaned.lower()
+    if _NON_FINDING_HEADER_RE.match(cleaned):
+        return True
+    if any(phrase in lowered for phrase in _NON_FINDING_WRAPPER_PHRASES):
+        return True
+    if re.search(
+        r"\b(?:raw\s+p|adjusted\s+p|p)\s*(?:=|<|>|<=|>=|≤|≥)|"
+        r"\b(?:effect\s+size|or|hr|rr)\s*=",
+        lowered,
+    ):
+        return False
+    if cleaned.endswith(":") and len(cleaned.rstrip(":").split()) <= 10:
+        if not _has_interpretable_claim_verb(cleaned):
+            return True
+    if re.fullmatch(r"(?:\*\*|__)?[a-z0-9 _/\-()%'.,]+(?:\*\*|__)?", cleaned, re.IGNORECASE):
+        if len(cleaned.split()) <= 8 and not _has_interpretable_claim_verb(cleaned):
+            return any(
+                token in lowered
+                for token in (
+                    "hazard",
+                    "ratio",
+                    "effect",
+                    "cohen",
+                    "bootstrap",
+                    "follow",
+                    "binary",
+                    "columns",
+                    "imputation",
+                    "rationale",
+                    "median survival",
+                )
+            )
+    return False
+
+
+def is_non_finding_header_artifact(finding: Any) -> bool:
+    if isinstance(finding, str):
+        return is_non_finding_header_artifact_text(finding)
+
+    primary_text = _first_text_field(finding, _PRIMARY_ARTIFACT_TEXT_FIELDS)
+    if primary_text:
+        return is_non_finding_header_artifact_text(primary_text)
+
+    return any(
+        is_non_finding_header_artifact_text(text)
+        for text in _iter_text_fields(finding, _RAW_STAT_ARTIFACT_TEXT_FIELDS)
+    )
+
+
+def is_user_facing_nonfinding_artifact(finding: Any) -> bool:
+    return is_raw_stat_artifact_finding(finding) or is_non_finding_header_artifact(finding)
+
+
+def _clean_header_candidate(text: str) -> str:
+    cleaned = " ".join((text or "").replace("\n", " ").split())
+    cleaned = cleaned.strip(" \t-•")
+    cleaned = re.sub(r"^#{1,6}\s*", "", cleaned)
+    cleaned = cleaned.strip()
+    if (cleaned.startswith("**") and cleaned.endswith("**")) or (cleaned.startswith("__") and cleaned.endswith("__")):
+        cleaned = cleaned[2:-2].strip()
+    return cleaned
+
+
+def _has_interpretable_claim_verb(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(
+            r"\b(was|were|is|are|had|has|showed|show|shows|associated|predicts?|predicted|"
+            r"correlated|differed|increased|decreased|reduced|lowered|raises?|lowers?)\b",
+            lowered,
+        )
+    )
+
+
+def _first_text_field(finding: Any, fields: tuple[str, ...]) -> str | None:
+    for text in _iter_text_fields(finding, fields):
+        if text:
+            return text
+    return None
+
+
+def _iter_text_fields(finding: Any, fields: tuple[str, ...]) -> list[str]:
+    texts: list[str] = []
+    if isinstance(finding, dict):
+        for field in fields:
+            value = finding.get(field)
+            if isinstance(value, str) and value.strip():
+                texts.append(value.strip())
+        return texts
+    for field in fields:
+        value = getattr(finding, field, None)
+        if isinstance(value, str) and value.strip():
+            texts.append(value.strip())
+    return texts
+
+
 def classify_finding_category(
     text: str,
     *,
@@ -272,16 +460,9 @@ def classify_finding_category(
     analysis_type: str | None = None,
 ) -> FindingCategory:
     lowered = " ".join((text or "").lower().split())
-    if _RAW_STAT_ARTIFACT_RE.search(text or "") and not any(
-        phrase in lowered
-        for phrase in (
-            "associated with",
-            "not associated",
-            "not significantly associated",
-            "was significantly associated",
-            "were significantly associated",
-        )
-    ):
+    if (text or "").strip() and is_non_finding_header_artifact_text(text):
+        return "statistical_note"
+    if is_raw_statistical_artifact_text(text):
         return "statistical_note"
 
     if any(pattern in lowered for pattern in _PREPROCESSING_PATTERNS):

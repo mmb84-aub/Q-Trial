@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+from qtrial_backend.agentic.finding_categories import is_user_facing_nonfinding_artifact
 from qtrial_backend.core.router import get_client
 from qtrial_backend.core.types import LLMRequest, ProviderName
 
@@ -62,6 +63,7 @@ def normalize_comparison_claims(
         for f in findings
         if str(f.get("claim_type") or "")
         in {"association_claim", "analytical_association", "negative_association"}
+        and not is_user_facing_nonfinding_artifact(f)
     ]
     if not eligible:
         return findings
@@ -105,6 +107,10 @@ def normalize_comparison_claims(
     updated: list[dict[str, Any]] = []
     for finding in findings:
         clone = dict(finding)
+        if is_user_facing_nonfinding_artifact(finding):
+            clone.setdefault("comparison_claim_text", None)
+            updated.append(clone)
+            continue
         if str(finding.get("claim_type") or "") not in {
             "association_claim",
             "analytical_association",
@@ -167,7 +173,7 @@ def _fallback_sentence(finding: dict[str, Any]) -> str:
     subject = _humanize_variable(str(finding.get("variable") or "This variable"))
     outcome = _endpoint_phrase(finding.get("endpoint"))
     significant = finding.get("significant_after_correction", finding.get("significant"))
-    direction = str(finding.get("direction") or "unknown")
+    direction = _ratio_direction(finding) or str(finding.get("direction") or "unknown")
     if significant is False:
         return f"{subject} did not show a statistically significant association with {outcome}."
     directional = _directional_subject(str(finding.get("variable") or ""), direction)
@@ -192,6 +198,26 @@ def _directional_subject(variable: str, direction: str) -> str | None:
     if direction == "negative":
         return f"Lower {cleaned}" if cleaned else None
     return None
+
+
+def _ratio_direction(finding: dict[str, Any]) -> str | None:
+    label = str(finding.get("effect_size_label") or "").lower()
+    if finding.get("odds_ratio") is not None:
+        label = "odds_ratio"
+        value = finding.get("odds_ratio")
+    else:
+        value = finding.get("effect_size")
+    if label not in {"odds_ratio", "hazard_ratio", "risk_ratio"}:
+        return None
+    try:
+        ratio = float(value)
+    except (TypeError, ValueError):
+        return None
+    if ratio > 1:
+        return "positive"
+    if ratio < 1:
+        return "negative"
+    return "none"
 
 
 def _endpoint_phrase(endpoint: Any) -> str:

@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/multiple_testing.py
+# hypothesis_version: 6.151.9
+
+[0.05, 1.0, 'BH', 'Bonferroni (FWER)', 'adjusted_p_value', 'alpha', 'bh', 'bonferroni', 'endpoint_type', 'findings', 'gate_open', 'gated_out', 'holm', 'id', 'interpretation', 'label', 'method', 'n_tests', 'p_value', 'primary', 'primary_significant', 'raw_p_value', 'reason', 'results', 'secondary', 'significant', 'stats']

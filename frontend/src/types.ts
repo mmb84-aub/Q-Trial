@@ -127,16 +127,77 @@ export interface ComparableFinding {
   evidence_label: string;
   citations_present: boolean;
   metadata: Record<string, unknown>;
+  statistical_evidence: StatisticalEvidence | null;
+}
+
+export interface StatisticalEvidence {
+  variable: string | null;
+  endpoint: string | null;
+  test_type: string | null;
+  test_family: string | null;
+  p_value: number | null;
+  p_operator: string | null;
+  adjusted_p_value: number | null;
+  raw_p_value: number | null;
+  effect_size: number | null;
+  effect_size_label: string | null;
+  effect_direction: "positive" | "negative" | "none" | "unknown";
+  direction_effect_on_endpoint:
+    | "increases_endpoint_risk"
+    | "decreases_endpoint_risk"
+    | "no_direction"
+    | "unknown";
+  ci_lower: number | null;
+  ci_upper: number | null;
+  confidence_level: number | null;
+  statistic_value: number | null;
+  statistic_label: string | null;
+  significant: boolean | null;
+  direction: "positive" | "negative" | "none" | "unknown";
+  sample_size: number | null;
+  covariates: string[];
+  rank: number | null;
+  importance_score: number | null;
+  extraction_confidence: number;
+  source_text: string;
+}
+
+export interface StatisticalEvidenceComparison {
+  available: boolean;
+  reason_if_unavailable: string | null;
+  statistical_agreement_score: number | null;
+  statistical_agreement_coverage: number;
+  overall_statistical_agreement_score: number | null;
+  agreement_label: "strong" | "moderate" | "weak" | "contradiction" | "not_assessed";
+  significance_agreement: string;
+  direction_agreement: string;
+  effect_size_agreement: string;
+  p_value_agreement: string;
+  ci_agreement: string;
+  test_type_agreement: string;
+  rank_agreement: string;
+  effect_size_delta: number | null;
+  effect_size_relative_delta: number | null;
+  p_value_delta: number | null;
+  p_value_log_delta: number | null;
+  ci_overlap: boolean | null;
+  coverage_score: number;
+  qtrial_evidence: StatisticalEvidence | null;
+  human_evidence: StatisticalEvidence | null;
+  notes: string[];
+  warnings: string[];
 }
 
 export interface FindingMatch {
   qtrial_finding: ComparableFinding;
   human_finding: ComparableFinding;
   relation: "agree" | "partial_agree" | "contradict";
+  pairing_confidence: number | null;
   match_score: number;
   rationale: string;
   qtrial_evidence_stronger: boolean;
   text_used_for_matching?: Record<string, string>;
+  statistical_comparison: StatisticalEvidenceComparison | null;
 }
 
 export interface ComparisonMetrics {
@@ -155,9 +216,8 @@ export interface ComparisonMetrics {
   agreement_rate_over_matched: number;
   contradiction_rate_over_matched: number;
   evidence_upgrade_rate: number;
-  mcc: number | null;
-  mcc_interpretation: string | null;
-  mcc_explanation: string | null;
+  average_statistical_agreement_score: number | null;
+  average_statistical_evidence_coverage: number;
 }
 
 export interface HumanReportParseResult {

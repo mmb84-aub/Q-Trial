@@ -1,6 +1,9 @@
 from qtrial_backend.agentic.finding_categories import (
     classify_claim_type,
     classify_finding_category,
+    is_non_finding_header_artifact,
+    is_raw_stat_artifact_finding,
+    is_user_facing_nonfinding_artifact,
     neutral_status_for_category,
 )
 
@@ -106,6 +109,9 @@ def test_raw_chi_square_artifacts_are_statistical_notes() -> None:
     assert classify_finding_category("time: χ²=38.4916, p=0.0000") == "statistical_note"
     assert classify_finding_category("smoking: χ²=0.0074, p=0.9316") == "statistical_note"
     assert classify_finding_category("platelets: chi-square=14.2, p=0.002") == "statistical_note"
+    assert is_raw_stat_artifact_finding("`time`: χ²=38.4916, p=0.0000")
+    assert is_raw_stat_artifact_finding("`smoking`: χ²=1387.4548, p=0.0000")
+    assert is_raw_stat_artifact_finding("creatinine_phosphokinase χ²=69.9298, p=0.0000")
 
 
 def test_clinical_negative_finding_is_not_raw_chi_square_artifact() -> None:
@@ -118,6 +124,24 @@ def test_clinical_negative_finding_is_not_raw_chi_square_artifact() -> None:
         )
         == "analytical"
     )
+    assert not is_raw_stat_artifact_finding("Smoking was not significantly associated with mortality (p=0.41).")
+    assert not is_raw_stat_artifact_finding("Platelets did not show statistically significant association with mortality.")
+
+
+def test_statistical_headers_and_wrappers_are_non_finding_artifacts() -> None:
+    assert is_non_finding_header_artifact("Hazard Ratios (HR with 95% CI):")
+    assert is_non_finding_header_artifact("Effect Sizes (Cohen's d with 95% bootstrap CI):")
+    assert is_non_finding_header_artifact("Test_Selection_Rationale:")
+    assert is_non_finding_header_artifact("All continuous variables are non-normal (p<0.0001)")
+    assert is_non_finding_header_artifact("**Binary outcome:**")
+    assert is_user_facing_nonfinding_artifact("Hazard Ratios (HR with 95% CI):")
+
+
+def test_real_clinical_findings_are_not_header_artifacts() -> None:
+    assert not is_non_finding_header_artifact("Higher serum creatinine was associated with higher mortality risk.")
+    assert not is_non_finding_header_artifact("Higher ejection fraction was associated with lower mortality risk.")
+    assert not is_non_finding_header_artifact("Platelets did not show statistically significant association with mortality.")
+    assert not is_non_finding_header_artifact("Smoking was not significantly associated with mortality.")
 
 
 def test_survival_primary_is_not_analytical_category() -> None:

@@ -160,9 +160,9 @@ def _fallback_sentence(finding: dict[str, Any]) -> str:
     if significant is False:
         return f"{subject} was not significantly associated with {outcome}{_stat_parenthetical(finding)}."
     if significant is True:
-        direction = str(finding.get("direction") or "unknown")
-        directional_subject = _directional_subject(str(finding.get("variable") or ""), direction)
         effect_label = _effect_label(finding)
+        direction = _ratio_direction(finding, effect_label) or str(finding.get("direction") or "unknown")
+        directional_subject = _directional_subject(str(finding.get("variable") or ""), direction)
         if direction == "positive":
             if effect_label == "odds_ratio" and outcome == "mortality":
                 return f"{directional_subject or subject} was associated with higher odds of mortality{_stat_parenthetical(finding)}."
@@ -249,6 +249,21 @@ def _effect_label(finding: dict[str, Any]) -> str | None:
         return "odds_ratio"
     label = finding.get("effect_size_label")
     return str(label) if label else None
+
+
+def _ratio_direction(finding: dict[str, Any], effect_label: str | None) -> str | None:
+    if effect_label not in {"odds_ratio", "hazard_ratio", "risk_ratio"}:
+        return None
+    effect_value = finding.get("odds_ratio") if effect_label == "odds_ratio" else finding.get("effect_size")
+    try:
+        ratio = float(effect_value)
+    except (TypeError, ValueError):
+        return None
+    if ratio > 1:
+        return "positive"
+    if ratio < 1:
+        return "negative"
+    return "none"
 
 
 def _display_effect_label(label: str) -> str:

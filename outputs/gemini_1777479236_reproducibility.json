@@ -1,0 +1,11 @@
+{
+  "run_id": "gemini_1777479236",
+  "timestamp": "2026-04-29T16:13:56.612702+00:00",
+  "study_context": "Heart failure prognosis study.",
+  "seed": 42,
+  "llm_calls": [],
+  "literature_queries": [],
+  "clinical_search_terms": [],
+  "tool_call_log": [],
+  "synthesis_quality_score": null
+}

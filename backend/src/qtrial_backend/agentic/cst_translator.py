@@ -15,6 +15,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from qtrial_backend.agentic.finding_categories import (
+    classify_claim_type,
+    is_raw_stat_artifact_finding,
+    is_raw_statistical_artifact_text,
+    is_user_facing_nonfinding_artifact,
+)
 from qtrial_backend.agentic.schemas import ClinicalSearchTerm
 from qtrial_backend.core.router import get_client
 from qtrial_backend.core.types import LLMRequest, ProviderName
@@ -62,7 +68,11 @@ def translate_findings_to_cst(
     seen: set[str] = set()
     deduped: list[dict[str, Any]] = []
     for f in findings:
+        if is_user_facing_nonfinding_artifact(f):
+            continue
         payload = _coerce_finding_payload(f)
+        if is_user_facing_nonfinding_artifact(payload):
+            continue
         key = (payload["plain"] or payload["raw"]).strip().lower()
         if key not in seen:
             seen.add(key)
@@ -141,11 +151,12 @@ def translate_findings_to_cst(
 
 def _coerce_finding_payload(finding: str | dict[str, Any]) -> dict[str, Any]:
     if isinstance(finding, str):
+        category = "statistical_note" if is_user_facing_nonfinding_artifact(finding) else "analytical"
         return {
             "raw": finding,
             "plain": finding,
-            "finding_category": "analytical",
-            "claim_type": "association_claim",
+            "finding_category": category,
+            "claim_type": classify_claim_type(finding, finding_category=category),
             "direction": "unknown",
             "significance": "unclear",
         }
@@ -155,7 +166,9 @@ def _coerce_finding_payload(finding: str | dict[str, Any]) -> dict[str, Any]:
         finding.get("comparison_claim_text") or finding.get("comparison_claim") or ""
     ).strip()
     category = str(finding.get("finding_category") or "analytical").strip() or "analytical"
-    claim_type = str(finding.get("claim_type") or "association_claim").strip() or "association_claim"
+    if is_user_facing_nonfinding_artifact(finding) or is_raw_statistical_artifact_text(plain or raw):
+        category = "statistical_note"
+    claim_type = str(finding.get("claim_type") or classify_claim_type(plain or raw, finding_category=category)).strip() or "association_claim"
     p_value = finding.get("p_value", finding.get("adjusted_p_value", finding.get("raw_p_value")))
     effect_size_label = finding.get("effect_size_label")
     effect_size = finding.get("effect_size")

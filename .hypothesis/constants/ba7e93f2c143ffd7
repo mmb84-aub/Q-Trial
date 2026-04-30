@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/duplicate_checks.py
+# hypothesis_version: 6.151.9
+
+[100, 'count', 'duplicate_checks', 'exact_duplicates', 'example_indices', 'key_columns', 'max_rows_per_subject', 'n_duplicated_rows', 'n_total_rows', 'n_unique_subjects', 'pct', 'stats', 'subject_analysis', 'subject_column']
