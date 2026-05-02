@@ -23,11 +23,12 @@ interface Props {
   confirmedTreatmentColumns: string[];
   provider?: string;
   model?: string;
+  featureSelectionMethod?: string;
   progressMessages: string[];
   dispatch: React.Dispatch<PipelineAction>;
 }
 
-export function ProgressStream({ file, dictFile, analystReportFile, studyContext, confirmedTreatmentColumns, provider = "gemini", model = "", progressMessages, dispatch }: Props) {
+export function ProgressStream({ file, dictFile, analystReportFile, studyContext, confirmedTreatmentColumns, provider = "gemini", model = "", featureSelectionMethod = "mrmr", progressMessages, dispatch }: Props) {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
@@ -37,6 +38,7 @@ export function ProgressStream({ file, dictFile, analystReportFile, studyContext
       formData.append("file", file);
       formData.append("study_context", studyContext);
       formData.append("provider", provider);
+      formData.append("feature_selection_method", featureSelectionMethod);
       if (model) formData.append("model", model);
       if (dictFile) formData.append("dict_file", dictFile);
       if (analystReportFile) formData.append("analyst_report_file", analystReportFile);

@@ -373,6 +373,7 @@ export interface PipelineState {
   outcomeColumn: string;
   provider: string;
   model: string;
+  featureSelectionMethod: string;
   detectedTreatmentColumns: string[];
   confirmedTreatmentColumns: string[];
   progressMessages: string[];
@@ -389,6 +390,7 @@ export type PipelineAction =
   | { type: "SET_ANALYST_REPORT_FILE"; payload: File | null }
   | { type: "SET_OUTCOME_COLUMN"; payload: string }
   | { type: "SET_PROVIDER"; payload: { provider: string; model: string } }
+  | { type: "SET_FEATURE_SELECTION_METHOD"; payload: string }
   | { type: "START_UPLOAD" }
   | { type: "TREATMENT_DETECTED"; payload: string[] }
   | { type: "CONFIRM_TREATMENT"; payload: string[] }

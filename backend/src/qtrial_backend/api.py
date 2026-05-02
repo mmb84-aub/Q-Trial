@@ -173,6 +173,7 @@ def _compute_protected_columns(
     column_dict: dict[str, str] | None,
     meta: MetadataInput | None,
 ) -> list[str]:
+    """Return clinically important variables that feature selection should preserve."""
     protected: set[str] = set()
     if endpoint_column and endpoint_column in df.columns:
         protected.add(endpoint_column)
@@ -428,6 +429,7 @@ async def run_analysis_stream(
     ),
     confirmed_treatment_columns: list[str] = Form(default=[]),
     dict_file: UploadFile | None = File(None, description="Optional JSON column dictionary"),
+    feature_selection_method: str = Form("mrmr", description="Feature selection method: univariate, mrmr, lasso, elastic_net, qubo"),
 ) -> StreamingResponse:
     """
     Same as /api/run but streams Server-Sent Events so the frontend can show
@@ -480,13 +482,12 @@ async def run_analysis_stream(
         set_openrouter_model(model if provider == "openrouter" else None)
         set_bedrock_model(model if provider == "bedrock" else None)
         try:
-            # ── 0. QUBO Feature Selection ─────────────────────────────────────
+            # ── 0. Feature Selection ──────────────────────────────────────────
             quantum_evidence = None
             selected_df = df
             try:
                 from qtrial_backend.dataset.evidence import build_dataset_evidence
-                profile = build_dataset_evidence(df)
-                quantum_evidence = run_qubo_feature_selection(df, profile, endpoint_column, 0.5)
+                from qtrial_backend.feature_selection import select_features
                 protected_columns = _compute_protected_columns(
                     df,
                     endpoint_column=endpoint_column,
@@ -494,11 +495,48 @@ async def run_analysis_stream(
                     column_dict=column_dict,
                     meta=meta,
                 )
-                selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column, protected_columns)
+                protected_columns = list(
+                    dict.fromkeys(
+                        protected_columns
+                        + [col for col in confirmed_treatment_columns if col in df.columns]
+                    )
+                )
+
+                method = feature_selection_method.lower()
+
+                if method == "qubo":
+                    profile = build_dataset_evidence(df)
+                    quantum_evidence = run_qubo_feature_selection(df, profile, endpoint_column, 0.5)
+                    quantum_evidence["method"] = "qubo"
+                    selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column, protected_columns)
+                else:
+                    fs_result = select_features(df, outcome_column=endpoint_column, method=method)
+                    selected_features = [
+                        col for col in fs_result.get("selected_features", []) if col in df.columns
+                    ]
+                    selected_columns = list(dict.fromkeys(selected_features + protected_columns))
+                    excluded_columns = [col for col in df.columns if col not in selected_columns]
+                    quantum_evidence = {
+                        "n_candidates": max(len(df.columns) - (1 if endpoint_column else 0), 0),
+                        "n_selected": len(selected_columns),
+                        "selected_columns": selected_columns,
+                        "excluded_columns": excluded_columns,
+                        "protected_columns": protected_columns,
+                        "protected_added_columns": [
+                            col for col in protected_columns if col not in selected_features
+                        ],
+                        "redundancy_before": fs_result.get("redundancy_measure", 0),
+                        "redundancy_after": fs_result.get("redundancy_measure", 0),
+                        "redundancy_reduction_pct": 0,
+                        "method": method,
+                        "selection_method": method,
+                    }
+                    selected_df = df[selected_columns] if selected_columns else df
+
                 console.print(
                     f"[green]✓ Feature selection:[/green] "
-                    f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} "
-                    f"features (redundancy reduced by {quantum_evidence['redundancy_reduction_pct']:.1f}%)"
+                    f"Method={method}, "
+                    f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} features"
                 )
             except Exception as exc:
                 console.print(f"[yellow]⚠ Feature selection warning: {exc}[/yellow]")

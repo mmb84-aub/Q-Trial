@@ -19,12 +19,14 @@ export default function App() {
     outcomeColumn: string,
     provider: string,
     model: string,
+    featureSelectionMethod: string,
   ) {
     dispatch({ type: "SET_FILE", payload: file });
     dispatch({ type: "SET_DICT_FILE", payload: dictFile });
     dispatch({ type: "SET_ANALYST_REPORT_FILE", payload: analystReportFile });
     dispatch({ type: "SET_OUTCOME_COLUMN", payload: outcomeColumn });
     dispatch({ type: "SET_PROVIDER", payload: { provider, model } });
+    dispatch({ type: "SET_FEATURE_SELECTION_METHOD", payload: featureSelectionMethod });
     dispatch({ type: "START_UPLOAD" });
 
     const form = new FormData();
@@ -91,6 +93,7 @@ export default function App() {
               confirmedTreatmentColumns={state.confirmedTreatmentColumns}
               provider={state.provider}
               model={state.model}
+              featureSelectionMethod={state.featureSelectionMethod}
               progressMessages={state.progressMessages}
               dispatch={dispatch}
             />

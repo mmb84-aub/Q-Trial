@@ -699,8 +699,12 @@ def run_agentic_insights(
 
     # ── Step 4 output: analysis_report + tool_log come from api.py ───────────
     # (run_statistical_agent_loop is called before this function)
-    _client = get_client(provider)
-    model_name: str = getattr(_client, "model", str(provider))
+    try:
+        _client = get_client(provider)
+        model_name: str = getattr(_client, "model", str(provider))
+    except Exception as exc:
+        console.print(f"[yellow]! Model metadata unavailable for {provider}: {exc}[/yellow]")
+        model_name = str(provider)
 
     if not analysis_report:
         console.print(
@@ -775,7 +779,7 @@ def run_agentic_insights(
                         or not is_user_facing_clinical_finding_eligible(finding)
                     ):
                         if is_analytical_category(category):
-                            category = "statistical_note"
+                            continue
                     if not is_analytical_category(category):
                         if best_text.lower() not in seen_qc_texts:
                             seen_qc_texts.add(best_text.lower())
@@ -834,7 +838,10 @@ def run_agentic_insights(
                         or is_raw_statistical_artifact_text(s)
                         or not is_user_facing_clinical_finding_eligible(s)
                     ):
-                        if s.lower() not in seen_qc_texts:
+                        if (
+                            (is_user_facing_nonfinding_artifact(s) or is_raw_statistical_artifact_text(s))
+                            and s.lower() not in seen_qc_texts
+                        ):
                             seen_qc_texts.add(s.lower())
                             supplemental_qc_findings.append(_build_qc_finding(s, "statistical_note"))
                         continue

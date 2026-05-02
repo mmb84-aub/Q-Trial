@@ -937,7 +937,7 @@ def _section_clinical_analysis(result: dict) -> str:
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def _section_variable_selection(quantum_evidence: dict) -> str:
-    """Generate Variable Selection section from QUBO feature selection results."""
+    """Generate Variable Selection section from feature selection results."""
     lines = ["## Variable Selection"]
 
     n_selected = quantum_evidence.get("n_selected", 0)
@@ -947,11 +947,22 @@ def _section_variable_selection(quantum_evidence: dict) -> str:
     redundancy_reduction_pct = quantum_evidence.get("redundancy_reduction_pct", 0.0)
     selected_columns = quantum_evidence.get("selected_columns", [])
     excluded_columns = quantum_evidence.get("excluded_columns", [])
-    selection_method = quantum_evidence.get("selection_method", "qubo")
+    selection_method = quantum_evidence.get("method") or quantum_evidence.get("selection_method", "qubo")
+    method_labels = {
+        "qubo": "QUBO-based combinatorial optimisation",
+        "greedy_diversity": "greedy diversity fallback selection",
+        "error_fallback": "fallback feature selection",
+        "relevance_fallback": "relevance fallback selection",
+        "mrmr": "mRMR feature selection",
+        "univariate": "univariate statistical feature selection",
+        "lasso": "LASSO feature selection",
+        "elastic_net": "Elastic Net feature selection",
+    }
+    method_label = method_labels.get(str(selection_method), str(selection_method))
 
     lines.append(
         f"\nBefore statistical analysis, **{n_selected} variables** were selected from "
-        f"**{n_candidates}** total using QUBO-based combinatorial optimisation. "
+        f"**{n_candidates}** total using {method_label}. "
         f"This reduces redundancy between variables and focuses the analysis on the "
         f"strongest signals relative to the outcome."
     )
