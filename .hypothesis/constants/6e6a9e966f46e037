@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/providers/claude_client.py
+# hypothesis_version: 6.151.9
+
+[1200, 8192, 'assistant', 'claude', 'content', 'end_turn', 'id', 'input', 'is_error', 'max_tokens', 'messages', 'model', 'name', 'role', 'system', 'text', 'tool', 'tool_result', 'tool_use', 'tool_use_id', 'tools', 'type', 'user']

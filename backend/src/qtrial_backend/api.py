@@ -128,11 +128,13 @@ def _ensure_endpoint_selected(
     df: pd.DataFrame,
     quantum_evidence: dict | None,
     endpoint_column: str | None,
+    protected_columns: list[str] | None = None,
 ) -> pd.DataFrame:
     if quantum_evidence is None:
         return df
 
     selected_columns = list(quantum_evidence.get("selected_columns") or [])
+    protected_columns = [c for c in (protected_columns or []) if c in df.columns]
     if endpoint_column and endpoint_column in df.columns and endpoint_column not in selected_columns:
         selected_columns.append(endpoint_column)
         quantum_evidence["selected_columns"] = selected_columns
@@ -142,7 +144,72 @@ def _ensure_endpoint_selected(
             col for col in excluded_columns if col != endpoint_column
         ]
 
+    added_protected = [c for c in protected_columns if c not in selected_columns]
+    if added_protected:
+        selected_columns.extend(added_protected)
+        quantum_evidence["selected_columns"] = selected_columns
+        quantum_evidence["n_selected"] = len(selected_columns)
+        excluded_columns = list(quantum_evidence.get("excluded_columns") or [])
+        quantum_evidence["excluded_columns"] = [col for col in excluded_columns if col not in added_protected]
+        quantum_evidence["protected_columns"] = protected_columns
+        quantum_evidence["protected_added_columns"] = added_protected
+
     return df[selected_columns] if selected_columns else df
+
+
+_CLINICAL_PROTECTED_HINTS = re.compile(
+    r"\b(age|sex|gender|sodium|na\b|creatinine|egfr|ejection|ef\b|blood\s+pressure|sbp|dbp|"
+    r"diabet|anaemi|hypertens|smok|mortality|death|surviv|treat|dose|baseline|severity|"
+    r"biomarker|lab|platelet|hemoglobin|cpk|creatinine\s+phosphokinase)\b",
+    re.IGNORECASE,
+)
+
+
+def _compute_protected_columns(
+    df: pd.DataFrame,
+    *,
+    endpoint_column: str | None,
+    analyst_report_text: str | None,
+    column_dict: dict[str, str] | None,
+    meta: MetadataInput | None,
+) -> list[str]:
+    protected: set[str] = set()
+    if endpoint_column and endpoint_column in df.columns:
+        protected.add(endpoint_column)
+    if meta and meta.important_variables:
+        for v in meta.important_variables:
+            if v in df.columns:
+                protected.add(v)
+            else:
+                norm_v = _normalize_column_name(v)
+                for col in df.columns:
+                    if _normalize_column_name(col) == norm_v:
+                        protected.add(col)
+                        break
+
+    # Protect clinically important variables by name or data dictionary semantics.
+    for col in df.columns:
+        if _CLINICAL_PROTECTED_HINTS.search(col):
+            protected.add(col)
+            continue
+        if column_dict:
+            desc = column_dict.get(col) or ""
+            if desc and _CLINICAL_PROTECTED_HINTS.search(desc):
+                protected.add(col)
+
+    # If a human analyst report is provided, protect mentioned variables so they remain analyzable/comparable.
+    if analyst_report_text:
+        lowered = analyst_report_text.lower()
+        for col in df.columns:
+            token = col.lower()
+            if len(token) >= 4 and token in lowered:
+                protected.add(col)
+                continue
+            normalized = _normalize_column_name(col)
+            if len(normalized) >= 4 and normalized in _normalize_column_name(lowered):
+                protected.add(col)
+
+    return sorted(protected)
 
 
 async def _read_dataset_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
@@ -275,7 +342,14 @@ async def run_analysis(
         quantum_evidence = await asyncio.to_thread(
             run_qubo_feature_selection, df, profile, endpoint_column, 0.5
         )
-        selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column)
+        protected_columns = _compute_protected_columns(
+            df,
+            endpoint_column=endpoint_column,
+            analyst_report_text=analyst_report_text,
+            column_dict=column_dict,
+            meta=meta,
+        )
+        selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column, protected_columns)
         console.print(
             f"[green]✓ Feature selection:[/green] "
             f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} columns "
@@ -413,7 +487,14 @@ async def run_analysis_stream(
                 from qtrial_backend.dataset.evidence import build_dataset_evidence
                 profile = build_dataset_evidence(df)
                 quantum_evidence = run_qubo_feature_selection(df, profile, endpoint_column, 0.5)
-                selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column)
+                protected_columns = _compute_protected_columns(
+                    df,
+                    endpoint_column=endpoint_column,
+                    analyst_report_text=analyst_report_text,
+                    column_dict=column_dict,
+                    meta=meta,
+                )
+                selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column, protected_columns)
                 console.print(
                     f"[green]✓ Feature selection:[/green] "
                     f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} "

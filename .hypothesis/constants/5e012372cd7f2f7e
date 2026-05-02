@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/mice_imputation.py
+# hypothesis_version: 6.151.9
+
+[0.0, 1.0, 1.96, 'ci_lower', 'ci_upper', 'column', 'imputed_columns', 'imputed_dataframe', 'm_imputations', 'method', 'mice_imputation', 'number', 'pooled_mean', 'pooled_std', 'rubins_rules_applied', 'stats']

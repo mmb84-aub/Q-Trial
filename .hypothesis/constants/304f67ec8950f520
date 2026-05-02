@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/power_analysis.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.05, 0.6, 0.8, 0.9, 1.0, 'Adequate (≥80%)', 'achieved_power', 'adequately_powered', 'alpha', 'effect_size', 'effect_size_input', 'error', 'interpretation', 'n_per_group', 'n_per_group_observed', 'one-sample', 'paired', 'power_analysis', 'power_classification', 'stats', 'test_type', 'two-sample']

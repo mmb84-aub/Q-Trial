@@ -11,6 +11,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from qtrial_backend.agentic.finding_categories import (
+    classify_claim_type,
+    is_endpoint_like_variable,
+    is_followup_time_variable,
+)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ──────────────────────────────────────────────────────────────────────────────
@@ -76,7 +82,7 @@ def _infer_direction_from_structured_result(
             return "negative"
         return "none"
 
-    if effect_size is not None and effect_size_label == "effect_size":
+    if effect_size is not None and effect_size_label in {"effect_size", "cohen_d", "mean_difference"}:
         if effect_size > 0:
             return "positive"
         if effect_size < 0:
@@ -98,6 +104,86 @@ def _is_binary_like(series: pd.Series) -> bool:
         return False
     normalized = {str(v).strip().lower() for v in values}
     return normalized <= {"0", "1", "0.0", "1.0", "false", "true"}
+
+
+def _two_group_labels(series: pd.Series) -> tuple[str, str] | None:
+    labels = sorted(series.dropna().astype(str).unique().tolist())
+    return (labels[0], labels[1]) if len(labels) == 2 else None
+
+
+def _binary_predictor_event_summary(
+    df: pd.DataFrame,
+    *,
+    predictor: str,
+    endpoint: str,
+) -> dict[str, float | str | None]:
+    groups = _two_group_labels(df[predictor])
+    if groups is None:
+        return {}
+    sub = df[[predictor, endpoint]].dropna().copy()
+    sub[endpoint] = pd.to_numeric(sub[endpoint], errors="coerce")
+    sub = sub.dropna()
+    low_label, high_label = groups
+    low_events = sub.loc[sub[predictor].astype(str) == low_label, endpoint]
+    high_events = sub.loc[sub[predictor].astype(str) == high_label, endpoint]
+    if low_events.empty or high_events.empty:
+        return {}
+    low_rate = float(low_events.mean())
+    high_rate = float(high_events.mean())
+    odds_ratio: float | None = None
+    if 0.0 < low_rate < 1.0 and 0.0 < high_rate < 1.0:
+        odds_ratio = (high_rate / (1.0 - high_rate)) / (low_rate / (1.0 - low_rate))
+    return {
+        "reference_label": low_label,
+        "comparison_label": high_label,
+        "event_rate_reference": round(low_rate, 6),
+        "event_rate_comparison": round(high_rate, 6),
+        "risk_difference": round(high_rate - low_rate, 6),
+        "odds_ratio": round(odds_ratio, 6) if odds_ratio is not None else None,
+    }
+
+
+def _direction_from_event_rates(summary: dict[str, object]) -> str:
+    diff = summary.get("risk_difference")
+    if not isinstance(diff, (int, float)):
+        return "unknown"
+    if diff > 0:
+        return "positive"
+    if diff < 0:
+        return "negative"
+    return "none"
+
+
+def _direction_label(variable: str | None, endpoint: str | None, direction: str, significant: bool | None) -> str:
+    subject = (variable or "variable").replace("_", " ")
+    outcome = "mortality" if endpoint == "mortality" else endpoint or "the outcome"
+    if significant is False:
+        return "no statistically significant association"
+    if direction == "positive":
+        return f"higher {subject} associated with higher {outcome}"
+    if direction == "negative":
+        return f"higher {subject} associated with lower {outcome}"
+    if direction == "none":
+        return "no directional difference"
+    return "direction not established"
+
+
+def _finding_category_for_result(
+    *,
+    variable: str | None,
+    endpoint: str | None,
+    significant: bool,
+    finding_id: str,
+) -> str:
+    if finding_id == "survival_primary":
+        return "statistical_note"
+    if variable and (is_endpoint_like_variable(variable, endpoint) or variable == endpoint):
+        return "artifact_excluded"
+    if variable and is_followup_time_variable(variable):
+        return "statistical_note"
+    if is_endpoint_like_variable(finding_id, endpoint):
+        return "statistical_note" if finding_id == "survival_primary" else "artifact_excluded"
+    return "clinical_association" if significant else "negative_association"
 
 
 def _resolve_survival_event_column(
@@ -364,6 +450,8 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                     _normalized_name(treatment_col),
                     _normalized_name(subject_col),
                 }
+                and not is_endpoint_like_variable(c, resolved_event_col)
+                and not is_followup_time_variable(c)
             ]
             event_values = analysis_df[resolved_event_col].dropna().astype(str).unique().tolist()
             if len(event_values) >= 2:
@@ -384,22 +472,12 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                         p_val = test_info.get("p_value")
                         if p_val is None:
                             continue
-                        es_params = EffectSizeParams(
-                            numeric_column=predictor,
-                            group_column=resolved_event_col,
-                            group_a=group_a_label,
-                            group_b=group_b_label,
-                            compute_risk_measures=True,
+                        event_summary = _binary_predictor_event_summary(
+                            analysis_df,
+                            predictor=predictor,
+                            endpoint=resolved_event_col,
                         )
-                        es_res = _safe(_effect_size, es_params, ctx)
-                        odds_ratio = None
-                        if isinstance(es_res, dict):
-                            rm = es_res.get("risk_measures", {})
-                            if isinstance(rm, dict) and rm.get("odds_ratio") is not None:
-                                try:
-                                    odds_ratio = float(rm["odds_ratio"])
-                                except (TypeError, ValueError):
-                                    odds_ratio = None
+                        odds_ratio = event_summary.get("odds_ratio")
                         cramers_v = None
                         if isinstance(test_info, dict) and test_info.get("cramers_v") is not None:
                             try:
@@ -410,12 +488,16 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                             {
                                 "predictor": predictor,
                                 "test_type": "categorical",
+                                "test_name": test_info.get("test") or "Chi-square",
                                 "crosstab": ct_res,
-                                "effect_size": es_res,
+                                "effect_size": {"event_summary": event_summary},
                                 "p_value": float(p_val),
                                 "effect_value": float(cramers_v or 0.0),
+                                "effect_size_label": "cramers_v",
                                 "effect_size_ci": [0.0, 0.0],
-                                "odds_ratio": odds_ratio,
+                                "odds_ratio": float(odds_ratio) if isinstance(odds_ratio, (int, float)) else None,
+                                "event_summary": event_summary,
+                                "direction": _direction_from_event_rates(event_summary),
                                 "endpoint_column": resolved_event_col,
                                 "n_per_group": max(int((analysis_df[resolved_event_col].astype(str) == group_a_label).sum()), 2),
                             }
@@ -443,6 +525,15 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                     if p_val is None:
                         continue
                     d_info = es_res.get("cohen_d", {}) if isinstance(es_res, dict) else {}
+                    mean_difference = None
+                    if isinstance(es_res, dict):
+                        group_a_mean = (es_res.get("group_a") or {}).get("mean") if isinstance(es_res.get("group_a"), dict) else None
+                        group_b_mean = (es_res.get("group_b") or {}).get("mean") if isinstance(es_res.get("group_b"), dict) else None
+                        try:
+                            if group_a_mean is not None and group_b_mean is not None:
+                                mean_difference = float(group_b_mean) - float(group_a_mean)
+                        except (TypeError, ValueError):
+                            mean_difference = None
                     oriented_effect = None
                     if isinstance(d_info, dict) and d_info.get("value") is not None:
                         try:
@@ -468,11 +559,14 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                         {
                             "predictor": predictor,
                             "test_type": "numeric",
+                            "test_name": ht_res.get("test") if isinstance(ht_res, dict) else "hypothesis_test",
                             "hypothesis_test": ht_res,
                             "effect_size": es_res,
                             "p_value": float(p_val),
                             "effect_value": float(oriented_effect or 0.0),
+                            "effect_size_label": "cohen_d",
                             "effect_size_ci": effect_ci,
+                            "mean_difference": round(mean_difference, 6) if mean_difference is not None else None,
                             "endpoint_column": resolved_event_col,
                             "n_per_group": n_pg,
                         }
@@ -646,9 +740,11 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             "p_value": float(p_val),
             "adjusted_p_value": float(p_val),
             "effect_size": d_val,
+            "effect_size_label": "cohen_d" if odds_ratio is None else "odds_ratio",
             "effect_size_ci": [ci_lo, ci_hi],
             "n_per_group": n_pg,
             "alpha": alpha,
+            "test_type": res.get("test") or "statistical_test",
         }
         if odds_ratio is not None:
             finding["odds_ratio"] = odds_ratio
@@ -695,9 +791,11 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                     "p_value": float(logrank_p),
                     "adjusted_p_value": float(logrank_p),
                     "effect_size": 0.0,
+                    "effect_size_label": "logrank",
                     "effect_size_ci": [0.0, 0.0],
                     "n_per_group": max(int(len(df) // 2), 2),
                     "alpha": alpha,
+                    "test_type": "kaplan_meier_logrank",
                 }
             )
         predictor_associations = primary_analysis.get("predictor_associations", [])
@@ -724,13 +822,20 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
                         "p_value": float(p_val),
                         "adjusted_p_value": float(p_val),
                         "effect_size": float(effect_value or 0.0),
+                        "effect_size_label": str(item.get("effect_size_label") or "effect_size"),
                         "effect_size_ci": effect_ci,
                         "n_per_group": n_pg,
                         "alpha": alpha,
+                        "test_type": item.get("test_name") or item.get("test_type"),
+                        "direction": item.get("direction"),
                     }
                 )
                 if item.get("odds_ratio") is not None:
                     raw_findings[-1]["odds_ratio"] = float(item["odds_ratio"])
+                if item.get("event_summary"):
+                    raw_findings[-1]["event_summary"] = item["event_summary"]
+                if item.get("mean_difference") is not None:
+                    raw_findings[-1]["mean_difference"] = item["mean_difference"]
 
     # Longitudinal: extract MMRM and cLDA findings for correction pipeline
     if outcome_type == "longitudinal":
@@ -863,18 +968,39 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             not gf.get("gated_out", False)
             and float(adj_p) < alpha
         )
-        direction = _infer_direction_from_structured_result(
+        effect_size_label = str(
+            "odds_ratio"
+            if odds_ratio is not None
+            else gf.get("effect_size_label") or "effect_size"
+        )
+        direction = str(gf.get("direction") or "") or _infer_direction_from_structured_result(
             effect_size=effect_size,
-            effect_size_label="effect_size",
+            effect_size_label=effect_size_label,
             odds_ratio=float(odds_ratio) if odds_ratio is not None else None,
+        )
+        finding_category = _finding_category_for_result(
+            variable=variable,
+            endpoint=endpoint,
+            significant=significant,
+            finding_id=str(fid),
+        )
+        claim_type = classify_claim_type(
+            str(variable or fid),
+            finding_category=finding_category,
+            variable=variable,
+            endpoint=endpoint,
+            significant=significant,
+            p_value=float(adj_p),
         )
         raw_parts = [variable or "finding"]
         if gf.get("p_value") is not None:
             raw_parts.append(f"raw p={round(float(gf.get('p_value', 1.0)), 6)}")
         raw_parts.append(f"adjusted p={round(float(adj_p), 6)}")
-        raw_parts.append(f"effect size={effect_size}")
+        raw_parts.append(f"{effect_size_label}={float(odds_ratio) if odds_ratio is not None else effect_size}")
         if odds_ratio is not None:
             raw_parts.append(f"OR={float(odds_ratio)}")
+        if gf.get("mean_difference") is not None:
+            raw_parts.append(f"mean difference={gf.get('mean_difference')}")
         raw_parts.append(
             "significant after correction" if significant else "not significant after correction"
         )
@@ -883,27 +1009,33 @@ def run_clinical_analysis(df: pd.DataFrame, config: dict) -> dict:  # noqa: C901
             "finding_id": fid,
             "finding_text_raw": raw_text,
             "finding_text_plain": None,
-            "finding_category": (
-                "survival_result"
-                if endpoint == "survival" or "survival" in str(fid).lower()
-                else "analytical"
-            ),
-            "claim_type": "association_claim",
+            "finding_category": finding_category,
+            "claim_type": claim_type,
             "variable": variable,
             "endpoint": endpoint,
             "direction": direction,
+            "direction_label": _direction_label(variable, endpoint, direction, significant),
             "analysis_type": "association",
             "endpoint_type": gf.get("endpoint_type", "secondary"),
+            "test_type": gf.get("test_type") or "statistical_test",
             "raw_p_value": round(float(gf.get("p_value", 1.0)), 6),
             "adjusted_p_value": round(float(adj_p), 6),
             "correction_method": gf.get("correction_method", "none"),
-            "effect_size": effect_size,
+            "effect_size": float(odds_ratio) if odds_ratio is not None else effect_size,
+            "effect_size_label": effect_size_label,
             "effect_size_ci": gf.get("effect_size_ci", [0.0, 0.0]),
             "achieved_power": round(float(pwr.get("achieved_power", 0.0)), 4),
             "power_adequate": bool(pwr.get("adequately_powered", False)),
             "n_required_80pct_power": pwr.get("n_required_80pct_power"),
             "significant_after_correction": significant,
         }
+        metadata: dict[str, object] = {}
+        if gf.get("event_summary"):
+            metadata["event_summary"] = gf["event_summary"]
+        if gf.get("mean_difference") is not None:
+            metadata["mean_difference"] = gf["mean_difference"]
+        if metadata:
+            cf["metadata"] = metadata
         if "effect_size_note" in gf:
             cf["effect_size_note"] = gf["effect_size_note"]
         if "odds_ratio" in gf and gf["odds_ratio"] is not None:

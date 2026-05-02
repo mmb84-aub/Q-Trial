@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/subgroup_analysis.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.05, 0.5, 1.0, 1.96, 2.5, 97.5, 500, 'Pr(>F)', 'binary', 'ci_lower', 'ci_upper', 'continuous', 'effect_size', 'interaction_p_value', 'interpretation', 'level', 'levels', 'n_control', 'n_treatment', 'nan', 'overall_n', 'p=N/A', 'p_value', 'significant', 'stats', 'subgroup_analysis', 'subgroup_column', 'subgroups', 'warning']

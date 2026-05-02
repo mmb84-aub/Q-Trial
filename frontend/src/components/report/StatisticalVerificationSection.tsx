@@ -126,6 +126,9 @@ function ClaimGroup({ label, claims }: { label: VerifiedClaim["label"]; claims: 
 
 function ClaimCard({ claim }: { claim: VerifiedClaim }) {
   const warnings = claim.confidence_warnings ?? [];
+  const showDirection =
+    typeof claim.metadata?.direction === "string" &&
+    (isSignificantPValue(claim.recomputed_p_value) || isSignificantPValue(claim.reported_p_value));
   return (
     <article style={{
       border: "1px solid #e5e7eb",
@@ -158,12 +161,27 @@ function ClaimCard({ claim }: { claim: VerifiedClaim }) {
       <div style={{ marginTop: "0.55rem", fontSize: "0.84rem", color: "#6b7280", lineHeight: 1.7 }}>
         {claim.variable && <span>Variable: {claim.variable}. </span>}
         {claim.endpoint && <span>Endpoint: {claim.endpoint}. </span>}
-        {claim.reported_p_value !== null && <span>Reported p={formatNumber(claim.reported_p_value)}. </span>}
-        {claim.recomputed_p_value !== null && <span>Recomputed p={formatNumber(claim.recomputed_p_value)}. </span>}
+        {claim.reported_p_value !== null && <span>Reported {formatPLabel(claim.reported_p_value)}. </span>}
+        {claim.recomputed_p_value !== null && <span>Recomputed {formatPLabel(claim.recomputed_p_value)}. </span>}
+        {showDirection && <span>Claimed direction: {String(claim.metadata.direction)}. </span>}
+        {claim.reported_effect_size !== null && (
+          <span>
+            Reported {claim.reported_effect_size_label ?? "effect"}={formatNumber(claim.reported_effect_size)}.{" "}
+          </span>
+        )}
         {claim.effect_size !== null && (
           <span>
-            Effect size{claim.effect_size_label ? ` (${claim.effect_size_label})` : ""}: {formatNumber(claim.effect_size)}.{" "}
+            Recomputed {claim.effect_size_label ?? "effect"}={formatNumber(claim.effect_size)}.{" "}
           </span>
+        )}
+        {claim.effect_agreement && claim.effect_agreement !== "not_assessed" && (
+          <span>Effect agreement: {claim.effect_agreement}. </span>
+        )}
+        {claim.reported_ci_lower !== null && claim.reported_ci_upper !== null && (
+          <span>Reported CI {formatNumber(claim.reported_ci_lower)} to {formatNumber(claim.reported_ci_upper)}. </span>
+        )}
+        {claim.ci_lower !== null && claim.ci_upper !== null && (
+          <span>Recomputed CI {formatNumber(claim.ci_lower)} to {formatNumber(claim.ci_upper)}. </span>
         )}
       </div>
 
@@ -198,4 +216,21 @@ function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return "N/A";
   if (value !== 0 && Math.abs(value) < 0.001) return value.toExponential(2);
   return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function formatP(value: number): string {
+  if (!Number.isFinite(value)) return "N/A";
+  if (value === 0) return "<1e-12";
+  if (value >= 0.9995) return ">0.99";
+  if (Math.abs(value) < 0.001) return value.toExponential(2);
+  return formatNumber(value);
+}
+
+function formatPLabel(value: number): string {
+  const formatted = formatP(value);
+  return formatted.startsWith("<") || formatted.startsWith(">") ? `p ${formatted[0]} ${formatted.slice(1)}` : `p=${formatted}`;
+}
+
+function isSignificantPValue(value: number | null): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value < 0.05;
 }

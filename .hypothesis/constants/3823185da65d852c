@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/mmrm.py
+# hypothesis_version: 6.151.9
+
+[0.05, ':', 'Group Var', '_subject_id', 'aic', 'bic', 'coefficient', 'error', 'fallback', 'fixed_effects', 'formula', 'model', 'n_dropped_listwise', 'n_observations', 'n_subjects', 'nan', 'p_value', 'reml', 'se', 'significant', 'stats', 'term', 'tvalues', 'z']

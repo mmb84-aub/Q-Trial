@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/literature/pubmed.py
+# hypothesis_version: 6.151.9
+
+[800, ',', './/AbstractText', './/Article', './/Author', './/MedlineCitation', './/PubDate', './/PubmedArticle', 'ArticleTitle', 'Initials', 'LastName', 'PMID', 'Year', 'abstract', 'api_key', 'authors', 'count', 'db', 'esearchresult', 'id', 'idlist', 'json', 'literature', 'pmid', 'pubmed', 'query', 'results', 'retmax', 'retmode', 'rettype', 'search_pubmed', 'term', 'title', 'total_found', 'xml', 'year']

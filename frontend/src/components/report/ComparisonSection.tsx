@@ -1,4 +1,4 @@
-import type { ComparableFinding, ComparisonReport, FindingMatch } from "../../types";
+import type { ComparableFinding, ComparisonReport, FindingMatch, StatisticalEvidence, StatisticalEvidenceComparison } from "../../types";
 
 interface Props {
   comparison: ComparisonReport;
@@ -20,10 +20,14 @@ const METRIC_CARDS: Array<{ key: keyof ComparisonReport["metrics"]; label: strin
   { key: "matched_pairs", label: "Matched findings" },
   { key: "qtrial_only_count", label: "Q-Trial only" },
   { key: "human_only_count", label: "Human only" },
+  { key: "precision_against_human", label: "Precision", format: formatPercent },
+  { key: "recall_against_human", label: "Recall", format: formatPercent },
+  { key: "f1_against_human", label: "F1", format: formatPercent },
   { key: "agreement_count", label: "Agreements" },
   { key: "contradiction_count", label: "Contradictions" },
+  { key: "average_statistical_agreement_score", label: "Avg stat agreement", format: formatPercent },
+  { key: "average_statistical_evidence_coverage", label: "Stat evidence coverage", format: formatPercent },
   { key: "evidence_upgrade_rate", label: "Evidence upgrade rate", format: formatPercent },
-  { key: "mcc", label: "MCC", format: formatMcc },
 ];
 
 export function ComparisonSection({ comparison }: Props) {
@@ -71,13 +75,6 @@ export function ComparisonSection({ comparison }: Props) {
           );
         })}
       </div>
-      {comparison.metrics.mcc_interpretation && (
-        <p style={{ marginTop: "-0.75rem", marginBottom: "1.5rem", color: "#4b5563", fontSize: "0.9rem" }}>
-          MCC is computed on matched pairs with explicit binary significance labels; partial agreements are excluded.
-          Interpretation: <strong>{comparison.metrics.mcc_interpretation}</strong>.
-        </p>
-      )}
-
       <ComparisonMatchList title="Matched Findings" matches={comparison.matched_findings} />
       <ComparisonMatchList
         title="Contradictions"
@@ -134,8 +131,11 @@ function ComparisonMatchList({
               }}>
                 {RELATION_LABELS[match.relation]}
               </span>
-              <span style={{ fontSize: "0.78rem", color: "#6b7280" }}>
-                Match score {Math.round(match.match_score * 100)}%
+              <span
+                title="Pairing confidence estimates whether the two findings refer to the same claim. It is not an agreement score."
+                style={{ fontSize: "0.78rem", color: "#6b7280" }}
+              >
+                Pairing confidence {Math.round(pairingConfidence(match) * 100)}%
               </span>
               {match.qtrial_evidence_stronger && (
                 <span style={{
@@ -147,7 +147,7 @@ function ComparisonMatchList({
                   fontSize: "0.78rem",
                   fontWeight: 600,
                 }}>
-                  Evidence upgraded by Q-Trial
+                  Q-Trial provides quantitative evidence
                 </span>
               )}
             </div>
@@ -156,6 +156,8 @@ function ComparisonMatchList({
               <FindingPanel title="Q-Trial" finding={match.qtrial_finding} />
               <FindingPanel title="Human report" finding={match.human_finding} />
             </div>
+
+            <StatisticalEvidenceBlock comparison={match.statistical_comparison} />
 
             {match.rationale && (
               <p style={{ marginTop: "0.75rem", fontSize: "0.9rem", color: "#4b5563", lineHeight: 1.6 }}>
@@ -167,6 +169,102 @@ function ComparisonMatchList({
       )}
     </section>
   );
+}
+
+function StatisticalEvidenceBlock({ comparison }: { comparison: StatisticalEvidenceComparison | null }) {
+  if (!comparison) return null;
+  const labelStyle = statisticalLabelStyle(comparison.agreement_label);
+  const score = comparison.statistical_agreement_score ?? comparison.overall_statistical_agreement_score;
+  const coverage = comparison.statistical_agreement_coverage ?? comparison.coverage_score;
+  return (
+    <div style={{
+      marginTop: "0.85rem",
+      border: "1px solid #e5e7eb",
+      borderRadius: 8,
+      background: "#fff",
+      padding: "0.85rem",
+    }}>
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.65rem" }}>
+        <strong style={{ fontSize: "0.9rem", color: "#111827" }}>Statistical Evidence Agreement</strong>
+        <span style={{ ...labelStyle, borderRadius: 999, padding: "0.16rem 0.52rem", fontSize: "0.75rem", fontWeight: 700 }}>
+          {displayToken(comparison.agreement_label)}
+        </span>
+        {score !== null && (
+          <span style={{ fontSize: "0.78rem", color: "#6b7280" }}>
+            Score {Math.round(score * 100)}%
+          </span>
+        )}
+        <span style={{ fontSize: "0.78rem", color: "#6b7280" }}>
+          Coverage {Math.round(coverage * 100)}%
+        </span>
+      </div>
+
+      {!comparison.available && comparison.reason_if_unavailable ? (
+        <p style={{ margin: 0, color: "#6b7280", fontSize: "0.86rem", lineHeight: 1.55 }}>
+          Statistical evidence not assessed: {comparison.reason_if_unavailable}
+        </p>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.65rem" }}>
+            <EvidenceMiniPanel title="Q-Trial stats" evidence={comparison.qtrial_evidence} />
+            <EvidenceMiniPanel title="Human stats" evidence={comparison.human_evidence} />
+          </div>
+          <div style={{ marginTop: "0.65rem", fontSize: "0.82rem", color: "#4b5563", lineHeight: 1.6 }}>
+            <span>Significance: {displayToken(comparison.significance_agreement)}. </span>
+            <span>Direction: {displayToken(comparison.direction_agreement)}. </span>
+            <span>Effect: {displayToken(comparison.effect_size_agreement)}. </span>
+            <span>P-value: {displayToken(comparison.p_value_agreement)}. </span>
+            <span>CI: {displayToken(comparison.ci_agreement)}. </span>
+            <span>Test: {displayToken(comparison.test_type_agreement)}. </span>
+            {comparison.effect_size_delta !== null && <span>Effect delta {formatNumber(comparison.effect_size_delta)}. </span>}
+            {comparison.effect_size_relative_delta !== null && <span>Relative effect delta {formatPercent(comparison.effect_size_relative_delta)}. </span>}
+            {comparison.p_value_log_delta !== null && <span>p log10 delta {formatNumber(comparison.p_value_log_delta)}. </span>}
+            {comparison.ci_overlap !== null && <span>CI overlap: {comparison.ci_overlap ? "yes" : "no"}. </span>}
+          </div>
+        </>
+      )}
+
+      {(comparison.notes.length > 0 || comparison.warnings.length > 0) && (
+        <p style={{ margin: "0.55rem 0 0", color: "#6b7280", fontSize: "0.82rem", lineHeight: 1.55 }}>
+          {[...comparison.notes, ...comparison.warnings].join(" ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function pairingConfidence(match: FindingMatch) {
+  return match.pairing_confidence ?? match.match_score;
+}
+
+function EvidenceMiniPanel({ title, evidence }: { title: string; evidence: StatisticalEvidence | null }) {
+  if (!evidence) {
+    return <div style={{ color: "#6b7280", fontSize: "0.84rem" }}>{title}: no extracted evidence.</div>;
+  }
+  return (
+    <div style={{ fontSize: "0.82rem", color: "#4b5563", lineHeight: 1.65 }}>
+      <div style={{ color: "#111827", fontWeight: 700, marginBottom: "0.2rem" }}>{title}</div>
+      {evidence.p_value !== null && <span>{formatPLabel(evidence.p_value)}. </span>}
+      {evidence.effect_size !== null && <span>{displayEffectLabel(evidence.effect_size_label)}={formatNumber(evidence.effect_size)}. </span>}
+      {evidence.ci_lower !== null && evidence.ci_upper !== null && (
+        <span>CI {formatNumber(evidence.ci_lower)} to {formatNumber(evidence.ci_upper)}. </span>
+      )}
+      {evidence.test_type && <span>Test: {displayToken(evidence.test_type)}. </span>}
+      {evidence.direction !== "unknown" && <span>Direction: {displayDirection(evidence.direction)}. </span>}
+      {evidence.rank !== null && <span>Rank: {evidence.rank}. </span>}
+      {evidence.effect_size === null && evidence.p_value === null && evidence.ci_lower === null && (
+        <span>No numeric p-value, effect size, or CI reported. </span>
+      )}
+    </div>
+  );
+}
+
+function statisticalLabelStyle(label: StatisticalEvidenceComparison["agreement_label"]) {
+  if (label === "strong") return { background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" };
+  if (label === "moderate") return { background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe" };
+  if (label === "weak") return { background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" };
+  if (label === "contradiction") return { background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" };
+  return { background: "#f9fafb", color: "#4b5563", border: "1px solid #d1d5db" };
 }
 
 function ComparableFindingList({
@@ -213,9 +311,15 @@ function FindingPanel({ title, finding }: { title: string; finding: ComparableFi
         {finding.finding_text}
       </div>
       <div style={{ marginTop: "0.45rem", fontSize: "0.82rem", color: "#6b7280", lineHeight: 1.6 }}>
+        {finding.variable && <span>Variable: {displayToken(finding.variable)}. </span>}
         {finding.endpoint && <span>Endpoint: {finding.endpoint}. </span>}
+        {finding.significant !== false && finding.direction !== "unknown" && <span>Direction: {displayDirection(finding.direction)}. </span>}
         {finding.significance !== "unclear" && <span>Significance: {finding.significance.replace("_", " ")}. </span>}
-        {finding.p_value !== null && <span>p={finding.p_value}. </span>}
+        {finding.effect_size !== null && (
+          <span>{displayEffectLabel(finding.effect_size_label)}={formatNumber(finding.effect_size)}. </span>
+        )}
+        {finding.p_value !== null && <span>{formatPLabel(finding.p_value)}. </span>}
+        {finding.finding_category && <span>Category: {displayToken(finding.finding_category)}. </span>}
         <span>Evidence: {finding.evidence_label || "none"}.</span>
       </div>
     </div>
@@ -226,6 +330,44 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function formatMcc(value: number): string {
-  return value.toFixed(2);
+function displayDirection(direction: string): string {
+  if (direction === "positive") return "higher variable, higher endpoint";
+  if (direction === "negative") return "higher variable, lower endpoint";
+  if (direction === "none") return "no direction";
+  return direction;
+}
+
+function displayEffectLabel(label: string | null): string {
+  if (!label) return "Effect";
+  const labels: Record<string, string> = {
+    odds_ratio: "OR",
+    hazard_ratio: "HR",
+    risk_ratio: "RR",
+    cramers_v: "Cramer's V",
+    cohen_d: "Cohen's d",
+  };
+  return labels[label.toLowerCase()] ?? displayToken(label);
+}
+
+function displayToken(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function formatP(value: number): string {
+  if (!Number.isFinite(value)) return "N/A";
+  if (value === 0) return "<1e-12";
+  if (value >= 0.9995) return ">0.99";
+  if (Math.abs(value) < 0.001) return value.toExponential(2);
+  return formatNumber(value);
+}
+
+function formatPLabel(value: number): string {
+  const formatted = formatP(value);
+  return formatted.startsWith("<") || formatted.startsWith(">") ? `p ${formatted[0]} ${formatted.slice(1)}` : `p=${formatted}`;
+}
+
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return "N/A";
+  if (value !== 0 && Math.abs(value) < 0.001) return value.toExponential(2);
+  return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
 }

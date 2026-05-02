@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/agentic/cst_translator.py
+# hypothesis_version: 6.151.9
+
+['Empty term returned', '```', '```json', 'adjusted_p_value', 'analytical', 'association_claim', 'claim_type', 'comparison_claim', 'confidence_warning', 'direction', 'direction_label', 'effect_size', 'effect_size_label', 'endpoint', 'finding_category', 'finding_text', 'finding_text_plain', 'finding_text_raw', 'gemini', 'metadata', 'not_significant', 'odds_ratio', 'p_value', 'plain', 'raw', 'raw_p_value', 'significance', 'significant', 'source_finding_plain', 'source_finding_raw', 'statistical_note', 'temperature', 'term', 'test_type', 'test_used', 'unclear', 'unknown', 'variable']

@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/stat_test_selector.py
+# hypothesis_version: 6.151.9
+
+['1_group', '2_groups', "Cliff's delta", "Cohen's d", "Cohen's d (paired)", 'Log-rank test', 'Mann-Whitney U', "McNemar's test", 'Odds Ratio', 'Risk Ratio', 'alternatives', 'assumption', 'baseline_balance', 'binary', 'continuous', 'count', 'cross_tabulation', 'crossover', 'default', 'design', 'effect_size', 'fallback', 'hypothesis_test', 'model', 'multivariable', 'n_groups', 'n_per_group', 'non_parametric', 'normality_test', 'note', 'ordinal', 'outcome_type', 'paired', 'pairwise_group_test', 'parametric', 'ph_check', 'rct', 'recommended', 'repeated_measures', 'scenario', 'stat_test_selector', 'stats', 'survival', 'survival_analysis', 'test', 'tool', 'tools_to_use', 'warnings']

@@ -65,9 +65,13 @@ def verbalize_statistical_findings(
             "significant": f.get("significant_after_correction", f.get("significant")),
             "p_value": f.get("adjusted_p_value", f.get("raw_p_value")),
             "direction": f.get("direction", "unknown"),
+            "direction_label": f.get("direction_label"),
             "analysis_type": f.get("analysis_type", "association"),
+            "test_type": f.get("test_type"),
             "effect_size": f.get("effect_size"),
+            "effect_size_label": f.get("effect_size_label"),
             "odds_ratio": f.get("odds_ratio"),
+            "metadata": f.get("metadata"),
             "raw_statistical_text": f.get("finding_text_raw"),
         }
         for f in findings
@@ -97,7 +101,7 @@ def verbalize_statistical_findings(
         clone = dict(finding)
         sentence = sentence_map.get(str(finding.get("finding_id", "")).strip())
         validated = _validate_sentence(sentence, finding) if sentence else None
-        clone["finding_text_plain"] = validated or _fallback_sentence(finding)
+        clone["finding_text_plain"] = _prefer_evidence_sentence(validated, finding)
         updated.append(clone)
     return updated
 
@@ -143,16 +147,64 @@ def _fallback_sentence(finding: dict[str, Any]) -> str:
     subject = _humanize_variable(str(finding.get("variable") or "This variable"))
     outcome = _endpoint_phrase(finding.get("endpoint"))
     significant = finding.get("significant_after_correction", finding.get("significant"))
+    category = str(finding.get("finding_category") or "")
+    variable = str(finding.get("variable") or finding.get("finding_id") or "")
+    if category == "artifact_excluded":
+        return f"{subject} was excluded from analytical findings because it is an endpoint or derived endpoint-like variable."
+    if category == "statistical_note":
+        p_text = _stat_parenthetical(finding)
+        if variable.lower() == "survival_primary":
+            return f"The primary survival result was retained as a statistical note{p_text}, not as a baseline clinical predictor."
+        return f"{subject} was retained as a statistical note{p_text}, not as a primary clinical predictor."
+
     if significant is False:
-        return f"{subject} did not show a statistically significant association with {outcome}."
+        return f"{subject} was not significantly associated with {outcome}{_stat_parenthetical(finding)}."
     if significant is True:
-        return f"{subject} was significantly associated with {outcome}."
-    return f"{subject} was evaluated for association with {outcome}."
+        effect_label = _effect_label(finding)
+        direction = _ratio_direction(finding, effect_label) or str(finding.get("direction") or "unknown")
+        directional_subject = _directional_subject(str(finding.get("variable") or ""), direction)
+        if direction == "positive":
+            if effect_label == "odds_ratio" and outcome == "mortality":
+                return f"{directional_subject or subject} was associated with higher odds of mortality{_stat_parenthetical(finding)}."
+            if effect_label == "hazard_ratio" and outcome == "mortality":
+                return f"{directional_subject or subject} was associated with higher mortality hazard{_stat_parenthetical(finding)}."
+            return f"{directional_subject or subject} was associated with higher {outcome}{_stat_parenthetical(finding)}."
+        if direction == "negative":
+            if effect_label in {"odds_ratio", "hazard_ratio", "risk_ratio"} and outcome == "mortality":
+                return (
+                    f"Higher {subject.lower()} was associated with lower odds of mortality"
+                    f"{_stat_parenthetical(finding)}, consistent with lower {subject.lower()} indicating higher mortality risk."
+                )
+            high_subject = _directional_subject(str(finding.get("variable") or ""), "positive") or f"Higher {subject.lower()}"
+            return f"{high_subject} was associated with lower {outcome}{_stat_parenthetical(finding)}."
+        return f"{subject} was significantly associated with {outcome}{_stat_parenthetical(finding)}."
+    return f"{subject} was evaluated for association with {outcome}{_stat_parenthetical(finding)}."
+
+
+def _prefer_evidence_sentence(validated: str | None, finding: dict[str, Any]) -> str:
+    if _has_structured_evidence(finding):
+        return _fallback_sentence(finding)
+    return validated or _fallback_sentence(finding)
 
 
 def _humanize_variable(variable: str) -> str:
     cleaned = variable.replace("_", " ").strip()
     return cleaned.capitalize() if cleaned else "This variable"
+
+
+def _directional_subject(variable: str, direction: str) -> str | None:
+    cleaned = variable.replace("_", " ").strip().lower()
+    if not cleaned:
+        return None
+    if direction == "positive":
+        if cleaned == "age":
+            return "Older age"
+        return f"Higher {cleaned}"
+    if direction == "negative":
+        if cleaned == "age":
+            return "Younger age"
+        return f"Lower {cleaned}"
+    return None
 
 
 def _endpoint_phrase(endpoint: Any) -> str:
@@ -163,3 +215,96 @@ def _endpoint_phrase(endpoint: Any) -> str:
     if endpoint == "primary_outcome":
         return "the primary outcome"
     return "the outcome"
+
+
+def _has_structured_evidence(finding: dict[str, Any]) -> bool:
+    return any(
+        finding.get(key) is not None
+        for key in ("adjusted_p_value", "raw_p_value", "p_value", "effect_size", "odds_ratio", "test_type")
+    )
+
+
+def _stat_parenthetical(finding: dict[str, Any]) -> str:
+    parts: list[str] = []
+    effect_label = _effect_label(finding)
+    effect_value = finding.get("odds_ratio") if effect_label == "odds_ratio" else finding.get("effect_size")
+    if effect_label and effect_value is not None:
+        parts.append(f"{_display_effect_label(effect_label)} {_format_number(effect_value)}")
+    p_value = finding.get("adjusted_p_value", finding.get("p_value", finding.get("raw_p_value")))
+    test_type = str(finding.get("test_type") or "").strip()
+    if p_value is not None:
+        p_text = _format_p_value(p_value)
+        p_display = f"p {p_text[0]} {p_text[1:]}" if p_text.startswith(("<", ">")) else f"p={p_text}"
+        if test_type:
+            parts.append(f"{test_type} {p_display}")
+        else:
+            parts.append(p_display)
+    if not parts:
+        return ""
+    return f" ({', '.join(parts)})"
+
+
+def _effect_label(finding: dict[str, Any]) -> str | None:
+    if finding.get("odds_ratio") is not None:
+        return "odds_ratio"
+    label = finding.get("effect_size_label")
+    return str(label) if label else None
+
+
+def _ratio_direction(finding: dict[str, Any], effect_label: str | None) -> str | None:
+    if effect_label not in {"odds_ratio", "hazard_ratio", "risk_ratio"}:
+        return None
+    effect_value = finding.get("odds_ratio") if effect_label == "odds_ratio" else finding.get("effect_size")
+    try:
+        ratio = float(effect_value)
+    except (TypeError, ValueError):
+        return None
+    if ratio > 1:
+        return "positive"
+    if ratio < 1:
+        return "negative"
+    return "none"
+
+
+def _display_effect_label(label: str) -> str:
+    normalized = label.lower()
+    return {
+        "odds_ratio": "OR",
+        "hazard_ratio": "HR",
+        "risk_ratio": "RR",
+        "cramers_v": "Cramer's V",
+        "cramer_v": "Cramer's V",
+        "cohen_d": "Cohen's d",
+        "mean_difference": "mean difference",
+        "correlation": "correlation",
+        "correlation_coefficient": "correlation",
+    }.get(normalized, label.replace("_", " "))
+
+
+def _format_p_value(value: Any) -> str:
+    parsed = _safe_float(value)
+    if parsed is None:
+        return str(value)
+    if parsed == 0:
+        return "<1e-12"
+    if parsed >= 0.9995:
+        return ">0.99"
+    if abs(parsed) < 0.001:
+        return f"{parsed:.2e}"
+    return f"{parsed:.4f}".rstrip("0").rstrip(".")
+
+
+def _format_number(value: Any) -> str:
+    parsed = _safe_float(value)
+    if parsed is None:
+        return str(value)
+    if parsed != 0 and abs(parsed) < 0.001:
+        return f"{parsed:.2e}"
+    return f"{parsed:.4f}".rstrip("0").rstrip(".")
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

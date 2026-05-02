@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/rag/store.py
+# hypothesis_version: 6.151.9
+
+['avg_chunk_chars', 'chunks', 'documents', 'documents_by_type', 'source_type', 'total_chunk_chars']

@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/plot_spec.py
+# hypothesis_version: 6.151.9
+
+[0.25, 0.5, 0.75, 1.5, 100, 500, 'Count', 'Overall', '_ev', 'bar', 'bin_edges', 'boxplot', 'categories', 'coerce', 'columns', 'correlation_heatmap', 'counts', 'group_column', 'histogram', 'kde', 'kind', 'km_curve', 'label', 'left', 'matrix', 'median', 'median_survival', 'n', 'n_events', 'n_shown', 'n_total', 'number', 'outliers', 'pearson', 'plot_spec', 'q1', 'q3', 'scatter', 'series', 'stats', 'survival', 'timeline', 'title', 'whisker_high', 'whisker_low', 'x', 'x_column', 'x_label', 'y', 'y_column', 'y_label']

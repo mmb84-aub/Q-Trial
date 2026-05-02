@@ -35,18 +35,40 @@ export interface GroundedFinding {
     | "QC Observation";
   finding_category?:
     | "analytical"
+    | "clinical_association"
+    | "negative_association"
     | "survival_result"
     | "endpoint_result"
+    | "statistical_note"
     | "data_quality"
+    | "data_quality_note"
     | "preprocessing"
     | "pipeline_warning"
-    | "qc_note";
+    | "qc_note"
+    | "artifact_excluded";
   claim_type?:
     | "association_claim"
+    | "analytical_association"
+    | "negative_association"
     | "descriptive_claim"
+    | "descriptive_context"
+    | "statistical_note"
     | "data_quality_claim"
+    | "data_quality_note"
     | "setup_claim"
-    | "metadata_claim";
+    | "metadata_claim"
+    | "recommendation"
+    | "artifact";
+  variable?: string | null;
+  endpoint?: string | null;
+  direction?: "positive" | "negative" | "none" | "unknown";
+  direction_label?: string | null;
+  significant?: boolean | null;
+  significance?: "significant" | "not_significant" | "unclear";
+  p_value?: number | null;
+  effect_size?: number | null;
+  effect_size_label?: string | null;
+  test_type?: string | null;
   citations: LiteratureArticle[];
   evidence_strength: EvidenceStrengthScore | null;
   novel_statement: string | null;
@@ -55,6 +77,7 @@ export interface GroundedFinding {
   test_selection_rationale: string | null;
   missingness_disclosure: string | null;
   confidence_warning: string | string[] | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ComparableFinding {
@@ -66,21 +89,36 @@ export interface ComparableFinding {
   section: string | null;
   finding_category?:
     | "analytical"
+    | "clinical_association"
+    | "negative_association"
     | "survival_result"
     | "endpoint_result"
+    | "statistical_note"
     | "data_quality"
+    | "data_quality_note"
     | "preprocessing"
     | "pipeline_warning"
     | "qc_note"
+    | "artifact_excluded"
     | null;
   claim_type?:
     | "association_claim"
+    | "analytical_association"
+    | "negative_association"
     | "descriptive_claim"
+    | "descriptive_context"
+    | "statistical_note"
     | "data_quality_claim"
+    | "data_quality_note"
     | "setup_claim"
     | "metadata_claim"
+    | "recommendation"
+    | "artifact"
     | null;
+  variable: string | null;
   endpoint: string | null;
+  direction: "positive" | "negative" | "none" | "unknown";
+  significant: boolean | null;
   significance: "significant" | "not_significant" | "unclear";
   p_value: number | null;
   effect_size: number | null;
@@ -89,16 +127,77 @@ export interface ComparableFinding {
   evidence_label: string;
   citations_present: boolean;
   metadata: Record<string, unknown>;
+  statistical_evidence: StatisticalEvidence | null;
+}
+
+export interface StatisticalEvidence {
+  variable: string | null;
+  endpoint: string | null;
+  test_type: string | null;
+  test_family: string | null;
+  p_value: number | null;
+  p_operator: string | null;
+  adjusted_p_value: number | null;
+  raw_p_value: number | null;
+  effect_size: number | null;
+  effect_size_label: string | null;
+  effect_direction: "positive" | "negative" | "none" | "unknown";
+  direction_effect_on_endpoint:
+    | "increases_endpoint_risk"
+    | "decreases_endpoint_risk"
+    | "no_direction"
+    | "unknown";
+  ci_lower: number | null;
+  ci_upper: number | null;
+  confidence_level: number | null;
+  statistic_value: number | null;
+  statistic_label: string | null;
+  significant: boolean | null;
+  direction: "positive" | "negative" | "none" | "unknown";
+  sample_size: number | null;
+  covariates: string[];
+  rank: number | null;
+  importance_score: number | null;
+  extraction_confidence: number;
+  source_text: string;
+}
+
+export interface StatisticalEvidenceComparison {
+  available: boolean;
+  reason_if_unavailable: string | null;
+  statistical_agreement_score: number | null;
+  statistical_agreement_coverage: number;
+  overall_statistical_agreement_score: number | null;
+  agreement_label: "strong" | "moderate" | "weak" | "contradiction" | "not_assessed";
+  significance_agreement: string;
+  direction_agreement: string;
+  effect_size_agreement: string;
+  p_value_agreement: string;
+  ci_agreement: string;
+  test_type_agreement: string;
+  rank_agreement: string;
+  effect_size_delta: number | null;
+  effect_size_relative_delta: number | null;
+  p_value_delta: number | null;
+  p_value_log_delta: number | null;
+  ci_overlap: boolean | null;
+  coverage_score: number;
+  qtrial_evidence: StatisticalEvidence | null;
+  human_evidence: StatisticalEvidence | null;
+  notes: string[];
+  warnings: string[];
 }
 
 export interface FindingMatch {
   qtrial_finding: ComparableFinding;
   human_finding: ComparableFinding;
   relation: "agree" | "partial_agree" | "contradict";
+  pairing_confidence: number | null;
   match_score: number;
   rationale: string;
   qtrial_evidence_stronger: boolean;
   text_used_for_matching?: Record<string, string>;
+  statistical_comparison: StatisticalEvidenceComparison | null;
 }
 
 export interface ComparisonMetrics {
@@ -108,6 +207,8 @@ export interface ComparisonMetrics {
   qtrial_only_count: number;
   human_only_count: number;
   recall_against_human: number;
+  precision_against_human: number;
+  f1_against_human: number;
   novel_rate: number;
   agreement_count: number;
   partial_agreement_count: number;
@@ -115,8 +216,8 @@ export interface ComparisonMetrics {
   agreement_rate_over_matched: number;
   contradiction_rate_over_matched: number;
   evidence_upgrade_rate: number;
-  mcc: number | null;
-  mcc_interpretation: string | null;
+  average_statistical_agreement_score: number | null;
+  average_statistical_evidence_coverage: number;
 }
 
 export interface HumanReportParseResult {
@@ -161,6 +262,11 @@ export interface VerifiedClaim {
   effect_size_label: string | null;
   ci_lower: number | null;
   ci_upper: number | null;
+  reported_effect_size: number | null;
+  reported_effect_size_label: string | null;
+  reported_ci_lower: number | null;
+  reported_ci_upper: number | null;
+  effect_agreement: "agrees" | "conflicts" | "partial" | "not_assessed" | null;
   confidence_warnings: string[];
   rationale: string;
   metadata: Record<string, unknown>;

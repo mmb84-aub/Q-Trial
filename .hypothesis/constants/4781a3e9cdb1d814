@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/ancova.py
+# hypothesis_version: 6.151.9
+
+[0.05, ' + ', ':', 'ANCOVA', 'HC3', 'adj_r_squared', 'adjusted_mean', 'ancova', 'ci_lower', 'ci_upper', 'coefficient', 'covariates', 'f_statistic', 'formula', 'group', 'marginal_means', 'model', 'model_p_value', 'n_dropped_listwise', 'n_observations', 'name', 'nan', 'p_value', 'r_squared', 'se', 'significant', 'stats', 'term']

@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/providers/bedrock_client.py
+# hypothesis_version: 6.151.9
+
+[300, 'adaptive', 'additionalProperties', 'amazon.nova-pro-v1:0', 'ap', 'ap-', 'ap-southeast-2', 'ap-southeast-4', 'ap.', 'assistant', 'au', 'au.', 'bedrock', 'bedrock-runtime', 'content', 'description', 'end_turn', 'error', 'eu', 'eu-', 'eu.', 'global.', 'inferenceConfig', 'input', 'inputSchema', 'json', 'maxTokens', 'max_attempts', 'max_tokens', 'message', 'messages', 'mode', 'model', 'modelId', 'name', 'object', 'output', 'properties', 'role', 'status', 'stopReason', 'stop_sequence', 'success', 'system', 'text', 'tool', 'toolConfig', 'toolResult', 'toolSpec', 'toolUse', 'toolUseId', 'tool_use', 'tools', 'type', 'us', 'us.', 'user']

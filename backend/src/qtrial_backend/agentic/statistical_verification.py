@@ -14,6 +14,14 @@ from typing import Any
 import pandas as pd
 
 from qtrial_backend.agent.context import AgentContext
+from qtrial_backend.agentic.finding_categories import (
+    is_endpoint_like_variable,
+    is_followup_time_variable,
+    is_raw_stat_artifact_finding,
+    is_raw_statistical_artifact_text,
+    is_user_facing_clinical_finding_eligible,
+    is_user_facing_nonfinding_artifact,
+)
 from qtrial_backend.agentic.schemas import (
     StatisticalVerificationMetrics,
     StatisticalVerificationReport,
@@ -135,6 +143,11 @@ def _extract_candidates(
     known_columns = list(df.columns)
 
     for idx, text in enumerate(_iter_claim_texts(analyst_report_text), start=1):
+        if (
+            is_user_facing_nonfinding_artifact(text)
+            or is_raw_statistical_artifact_text(text)
+        ):
+            continue
         candidates.append(
             _build_candidate(
                 claim_id=f"analyst_{idx}",
@@ -150,6 +163,13 @@ def _extract_candidates(
     for idx, finding in enumerate(qtrial_findings or [], start=1):
         text = _finding_text(finding)
         if not text:
+            continue
+        if (
+            is_user_facing_nonfinding_artifact(finding)
+            or is_user_facing_nonfinding_artifact(text)
+            or is_raw_statistical_artifact_text(text)
+            or not is_user_facing_clinical_finding_eligible(finding)
+        ):
             continue
         candidates.append(
             _build_candidate(
@@ -172,11 +192,35 @@ def _iter_claim_texts(raw_text: str) -> list[str]:
         stripped = _BULLET_PREFIX_RE.sub("", line.strip())
         if not stripped:
             continue
+        if _looks_like_report_heading(stripped):
+            continue
         if len(stripped) < 180:
             texts.append(stripped)
         else:
             texts.extend(part.strip() for part in _SENTENCE_SPLIT_RE.split(stripped) if part.strip())
     return [_clean_text(text) for text in texts if len(_clean_text(text).split()) >= 4]
+
+
+def _looks_like_report_heading(text: str) -> bool:
+    cleaned = text.strip().strip("#").strip().rstrip(":")
+    lowered = cleaned.lower()
+    if any(
+        phrase in lowered
+        for phrase in (
+            "clinical analysis report",
+            "mortality analysis report",
+            "survival analysis report",
+            "statistical analysis report",
+            "analyst report",
+        )
+    ):
+        return True
+    if len(cleaned.split()) <= 8 and not re.search(
+        r"\b(was|were|is|are|had|has|showed|associated|predicts|predicted|significant|differed|difference|p\s*[=<>])\b",
+        lowered,
+    ):
+        return any(token in lowered for token in ("mortality", "survival", "endpoint", "analysis", "results"))
+    return False
 
 
 def _build_candidate(
@@ -197,7 +241,7 @@ def _build_candidate(
         variable = _resolve_group_column(text, df, metadata)
     reported_p_operator, reported_p_value = _extract_p_value(text)
     claimed_significant = _infer_claimed_significance(text, reported_p_operator, reported_p_value)
-    direction = _infer_direction(text)
+    direction = _infer_direction(text, variable=variable, endpoint=endpoint)
     reported_effect_label, reported_effect_size = _extract_reported_effect(text)
     reported_ci_lower, reported_ci_upper = _extract_reported_ci(text)
     claim_family = _classify_claim_family(text, df, columns, variable, endpoint, metadata)
@@ -588,6 +632,12 @@ def _label_from_significance(
     if claimed != recomputed_significant:
         return "contradicted", f"Claim significance={claimed}; recomputed significance={recomputed_significant} (p={p_value:.6g})."
 
+    if claimed is False and recomputed_significant is False:
+        if candidate.reported_p_value is not None and not _reported_p_value_matches(candidate, p_value):
+            op = candidate.reported_p_operator or "="
+            return "partial", f"Null conclusion agrees, but reported p{op}{candidate.reported_p_value:.6g} is not reproduced by recomputed p={p_value:.6g}."
+        return "verified", f"Null finding agrees with recomputed non-significant result (p={p_value:.6g})."
+
     claimed_direction = candidate.direction if candidate.direction in {"positive", "negative"} else None
     if claimed_direction:
         if observed_direction in {"positive", "negative"}:
@@ -757,6 +807,8 @@ def _classify_claim_family(
     metadata: Any | None,
 ) -> str | None:
     lowered = text.lower()
+    if variable and (variable == endpoint or is_endpoint_like_variable(variable, endpoint) or is_followup_time_variable(variable)):
+        return None
     if "baseline" in lowered and any(token in lowered for token in ("balance", "balanced", "imbalanced", "smd")):
         return "baseline_balance"
     if "correlat" in lowered and len([c for c in columns if pd.api.types.is_numeric_dtype(df[c])]) >= 2:
@@ -1195,12 +1247,38 @@ def _infer_claimed_significance(
     return None
 
 
-def _infer_direction(text: str) -> str | None:
+def _infer_direction(
+    text: str,
+    *,
+    variable: str | None = None,
+    endpoint: str | None = None,
+) -> str | None:
     lowered = text.lower()
     if any(term in lowered for term in ("not increased", "not higher", "not elevated", "not positive")):
         return None
     if any(term in lowered for term in ("not decreased", "not lower", "not reduced", "not negative")):
         return None
+    if variable:
+        for alias in sorted(_column_aliases(variable), key=len, reverse=True):
+            escaped = re.escape(alias.lower())
+            if re.search(rf"\b(?:higher|increased|elevated|older)\s+{escaped}\b", lowered):
+                return "positive"
+            if re.search(rf"\b(?:lower|decreased|reduced|younger)\s+{escaped}\b", lowered):
+                return "negative"
+            if re.search(rf"\b{escaped}\s+(?:was|were|is|are)?\s*(?:higher|increased|elevated)\b", lowered):
+                return "positive"
+            if re.search(rf"\b{escaped}\s+(?:was|were|is|are)?\s*(?:lower|decreased|reduced)\b", lowered):
+                return "negative"
+    if endpoint:
+        endpoint_aliases = _column_aliases(endpoint) | {"mortality", "death", "risk", "odds", "hazard"}
+        variable_oriented = lowered
+        for alias in endpoint_aliases:
+            variable_oriented = re.sub(
+                rf"\b(?:higher|increased|elevated|lower|decreased|reduced)\s+{re.escape(alias.lower())}\b",
+                " ",
+                variable_oriented,
+            )
+        lowered = variable_oriented
     if any(term in lowered for term in ("higher", "increased", "elevated", "positive")):
         return "positive"
     if any(term in lowered for term in ("lower", "decreased", "reduced", "negative")):

@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/dataset/evidence.py
+# hypothesis_version: 6.151.9
+
+[0.25, 0.75, 1.5, 100, ', ', 'abs_corr', 'cardinality', 'col_a', 'col_b', 'constant_columns', 'count', 'duplicate_count', 'id', 'id_duplicates', 'lower_fence', 'missingness_pct', 'number', 'outlier_flags', 'patient', 'patient_id', 'patientid', 'pct_of_col', 'subject', 'subject_id', 'subjectid', 'top_correlations', 'top_outlier_values', 'total_non_null', 'upper_fence']

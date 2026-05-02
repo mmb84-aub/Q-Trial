@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/providers/openai_client.py
+# hypothesis_version: 6.151.9
+
+['arguments', 'assistant', 'content', 'end_turn', 'function', 'id', 'length', 'max_tokens', 'messages', 'model', 'name', 'openai', 'output_text', 'role', 'stop', 'system', 'tool', 'tool_call_id', 'tool_calls', 'tool_use', 'tools', 'type', 'user']
