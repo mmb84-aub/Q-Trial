@@ -1102,6 +1102,8 @@ def _build_metrics(
 def _build_summary(metrics: ComparisonMetrics) -> str:
     summary = (
         f"Matched {metrics.matched_pairs} of {metrics.total_human_findings} human findings. "
+        f"Precision {metrics.precision_against_human:.0%}, recall {metrics.recall_against_human:.0%}, "
+        f"F1 {metrics.f1_against_human:.0%}. "
         f"Q-Trial surfaced {metrics.qtrial_only_count} additional findings, "
         f"agreed on {metrics.agreement_count}, partially agreed on {metrics.partial_agreement_count}, "
         f"and contradicted {metrics.contradiction_count} matched findings."
