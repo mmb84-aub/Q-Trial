@@ -20,6 +20,7 @@ const METRIC_CARDS: Array<{ key: keyof ComparisonReport["metrics"]; label: strin
   { key: "matched_pairs", label: "Matched findings" },
   { key: "precision_against_qtrial", label: "Precision", format: formatPercent },
   { key: "recall_against_human", label: "Recall", format: formatPercent },
+  { key: "f1_against_human", label: "F1", format: formatPercent },
   { key: "qtrial_only_count", label: "Q-Trial only" },
   { key: "human_only_count", label: "Human only" },
   { key: "agreement_count", label: "Agreements" },

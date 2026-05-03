@@ -157,14 +157,6 @@ def _ensure_endpoint_selected(
     return df[selected_columns] if selected_columns else df
 
 
-_CLINICAL_PROTECTED_HINTS = re.compile(
-    r"\b(age|sex|gender|sodium|na\b|creatinine|egfr|ejection|ef\b|blood\s+pressure|sbp|dbp|"
-    r"diabet|anaemi|hypertens|smok|mortality|death|surviv|treat|dose|baseline|severity|"
-    r"biomarker|lab|platelet|hemoglobin|cpk|creatinine\s+phosphokinase)\b",
-    re.IGNORECASE,
-)
-
-
 def _compute_protected_columns(
     df: pd.DataFrame,
     *,
@@ -173,33 +165,19 @@ def _compute_protected_columns(
     column_dict: dict[str, str] | None,
     meta: MetadataInput | None,
 ) -> list[str]:
-    """
-    Compute clinically important variables that should be protected from QUBO exclusion.
-    
-    Protects:
-    1. Endpoint/outcome column
-    2. Variables listed in metadata important_variables
-    3. Variables matching clinical keywords (age, sodium, creatinine, etc.)
-    4. Variables mentioned in data dictionary descriptions
-    5. Variables mentioned in human analyst report
-    
-    Args:
-        df: DataFrame with candidate columns
-        endpoint_column: Name of endpoint/outcome column
-        analyst_report_text: Uploaded human analyst report text
-        column_dict: Data dictionary mapping column names to descriptions
-        meta: Metadata input with important_variables list
-    
-    Returns:
-        Sorted list of protected column names
+    """Return columns that feature selection must always preserve.
+
+    Only the outcome endpoint and variables the user explicitly designated as
+    important are protected. Clinical-hint auto-detection and analyst-report
+    text matching have been removed because they protect so many columns in
+    typical clinical datasets that all selection methods converge to an
+    identical feature set, eliminating any differentiation between LASSO,
+    mRMR, and QUBO.
     """
     protected: set[str] = set()
-    
-    # Rule 1: Always protect endpoint column
     if endpoint_column and endpoint_column in df.columns:
         protected.add(endpoint_column)
-    
-    # Rule 2: Protect variables from metadata important_variables list
+
     if meta and meta.important_variables:
         for v in meta.important_variables:
             if v in df.columns:
@@ -210,29 +188,7 @@ def _compute_protected_columns(
                     if _normalize_column_name(col) == norm_v:
                         protected.add(col)
                         break
-    
-    # Rule 3: Protect clinically important variables by name or data dictionary semantics.
-    for col in df.columns:
-        if _CLINICAL_PROTECTED_HINTS.search(col):
-            protected.add(col)
-            continue
-        if column_dict:
-            desc = column_dict.get(col) or ""
-            if desc and _CLINICAL_PROTECTED_HINTS.search(desc):
-                protected.add(col)
-    
-    # Rule 4: If a human analyst report is provided, protect mentioned variables so they remain analyzable/comparable.
-    if analyst_report_text:
-        lowered = analyst_report_text.lower()
-        for col in df.columns:
-            token = col.lower()
-            if len(token) >= 4 and token in lowered:
-                protected.add(col)
-                continue
-            normalized = _normalize_column_name(col)
-            if len(normalized) >= 4 and normalized in _normalize_column_name(lowered):
-                protected.add(col)
-    
+
     return sorted(protected)
 
 

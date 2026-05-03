@@ -18,6 +18,8 @@ import pandas as pd
 from scipy import stats
 import neal
 
+from qtrial_backend.feature_selection.utils import default_feature_count
+
 logger = logging.getLogger(__name__)
 
 
@@ -264,6 +266,7 @@ def solve_qubo(
     Q: dict,
     num_reads: int = 1000,
     num_sweeps: int = 1000,
+    timeout_seconds: Optional[float] = None,
 ) -> dict:
     """
     Step 4: Solve QUBO using simulated annealing with diversity optimization.
@@ -312,10 +315,10 @@ def apply_hard_constraints(
     Step 5: Apply intelligent constraints to QUBO solver output.
     
     Strategy:
-    1. Always include outcome column (added back after solving)
-    2. Enforce adaptive min/max based on dataset characteristics:
-       - Minimum: max(4, ceil(sqrt(M))) where M = num candidates (ensures diversity)
-       - Maximum: min(20, M-1) (never reduce below meaningful set, cap at 20)
+    1. Enforce an adaptive selected-candidate target:
+       - Small datasets (<=20 candidates): keep about 75% for clinical coverage
+       - Larger datasets: keep about 55%, capped at 20 for interpretability
+    2. Always include outcome column (added back after solving)
     3. Never include excluded columns
     4. Within constraints, prefer high-relevance, low-redundancy selections from solver
     
@@ -331,45 +334,46 @@ def apply_hard_constraints(
     """
     M = len(candidate_columns)
     
-    # Adaptive minimum: encourage diversity (sqrt rule ensures at least sqrt(M) features)
-    min_features = max(4, int(np.ceil(np.sqrt(M))))
+    # Adaptive minimum: keep enough coverage for clinical report comparison.
+    min_features = default_feature_count(M)
     
     # Adaptive maximum: keep reasonable feature set, but cap at 20 for interpretability
-    max_features = min(20, max(8, M - 1))
+    max_features = min(20, max(min_features, M - 1))
     
     logger.debug(f"Hard constraints: M={M}, min_features={min_features}, max_features={max_features}")
     
     selected_cols = [candidate_columns[i] for i in selected_indices if i < M]
     
-    # Rule 1: Always include outcome column if designated
-    if outcome_column and outcome_column not in selected_cols:
-        selected_cols.append(outcome_column)
+    outcome_selected = bool(outcome_column)
     
-    # Rule 2: Never include excluded columns
+    # Rule 1: Never include excluded columns
     if excluded_columns:
         selected_cols = [col for col in selected_cols if col not in excluded_columns]
     
-    # Rule 3: Respect minimum floor
+    # Rule 2: Respect minimum candidate-feature floor
     current_count = len(selected_cols)
     if current_count < min_features:
         logger.info(f"Selected columns ({current_count}) below adaptive minimum ({min_features}). Expanding...")
         # Add highest-relevance non-selected columns
-        non_outcome_candidates = [c for c in candidate_columns if c != outcome_column and c not in selected_cols]
+        excluded_set = set(excluded_columns or [])
+        non_outcome_candidates = [
+            c
+            for c in candidate_columns
+            if c != outcome_column and c not in selected_cols and c not in excluded_set
+        ]
         sorted_candidates = sorted(non_outcome_candidates, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
         needed = min_features - current_count
         selected_cols.extend(sorted_candidates[:needed])
     
-    # Rule 4: Respect maximum cap
+    # Rule 3: Respect maximum candidate-feature cap
     if len(selected_cols) > max_features:
         logger.info(f"Selected columns ({len(selected_cols)}) exceed adaptive maximum ({max_features}). Trimming...")
-        # Keep outcome column if present, then trim to top by relevance
-        if outcome_column and outcome_column in selected_cols:
-            other_cols = [c for c in selected_cols if c != outcome_column]
-            sorted_other = sorted(other_cols, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
-            selected_cols = [outcome_column] + sorted_other[:max_features - 1]
-        else:
-            sorted_selected = sorted(selected_cols, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
-            selected_cols = sorted_selected[:max_features]
+        sorted_selected = sorted(selected_cols, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
+        selected_cols = sorted_selected[:max_features]
+
+    # Rule 4: Always include outcome column if designated
+    if outcome_selected and outcome_column not in selected_cols:
+        selected_cols.append(outcome_column)
     
     logger.info(f"Final selection: {len(selected_cols)} features (within [{min_features}, {max_features}])")
     return selected_cols
@@ -403,6 +407,7 @@ def run_qubo_feature_selection(
     profile: dict,
     outcome_column: Optional[str] = None,
     lambda_penalty: float = 1.0,
+    timeout_seconds: Optional[float] = None,
 ) -> dict:
     """
     Step 7: Main orchestration function for QUBO feature selection.
@@ -451,7 +456,7 @@ def run_qubo_feature_selection(
             "lambda_penalty": lambda_penalty,
             "num_reads": 1000,
             "num_sweeps": 1000,
-            "selection_method": "relevance_fallback",
+            "selection_method": "error_fallback",
             "outcome_column": outcome_column,
         }
     
@@ -474,7 +479,7 @@ def run_qubo_feature_selection(
     best_reduction = -float('inf')
     
     for attempt in range(3):
-        best_sample = solve_qubo(Q, num_reads=2000, num_sweeps=2000)
+        best_sample = solve_qubo(Q, num_reads=2000, num_sweeps=2000, timeout_seconds=timeout_seconds)
         selected_indices = [i for i, val in best_sample.items() if val == 1]
         
         # Apply hard constraints to get candidate selection

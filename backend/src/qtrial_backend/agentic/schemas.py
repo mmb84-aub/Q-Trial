@@ -966,7 +966,9 @@ class ComparisonMetrics(BaseModel):
     qtrial_only_count: int = 0
     human_only_count: int = 0
     precision_against_qtrial: float = 0.0
+    precision_against_human: float = 0.0
     recall_against_human: float = 0.0
+    f1_against_human: float = 0.0
     novel_rate: float = 0.0
     agreement_count: int = 0
     partial_agreement_count: int = 0

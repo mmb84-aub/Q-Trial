@@ -508,14 +508,19 @@ def _build_metrics(
 
     total_qtrial = len(qtrial_findings)
     total_human = len(human_findings)
+    precision = _ratio(matched_pairs, total_qtrial)
+    recall = _ratio(matched_pairs, total_human)
+    f1 = _ratio(2 * precision * recall, precision + recall) if precision + recall else 0.0
     return ComparisonMetrics(
         total_qtrial_findings=total_qtrial,
         total_human_findings=total_human,
         matched_pairs=matched_pairs,
         qtrial_only_count=len(qtrial_only),
         human_only_count=len(human_only),
-        precision_against_qtrial=_ratio(matched_pairs, total_qtrial),
-        recall_against_human=_ratio(matched_pairs, total_human),
+        precision_against_qtrial=precision,
+        precision_against_human=precision,
+        recall_against_human=recall,
+        f1_against_human=round(f1, 4),
         novel_rate=_ratio(len(qtrial_only), total_qtrial),
         agreement_count=agreement_count,
         partial_agreement_count=partial_count,
@@ -531,6 +536,8 @@ def _build_metrics(
 def _build_summary(metrics: ComparisonMetrics) -> str:
     summary = (
         f"Matched {metrics.matched_pairs} of {metrics.total_human_findings} human findings. "
+        f"Precision {metrics.precision_against_human:.0%}, recall {metrics.recall_against_human:.0%}, "
+        f"F1 {metrics.f1_against_human:.0%}. "
         f"Q-Trial surfaced {metrics.qtrial_only_count} additional findings, "
         f"agreed on {metrics.agreement_count}, partially agreed on {metrics.partial_agreement_count}, "
         f"and contradicted {metrics.contradiction_count} matched findings."

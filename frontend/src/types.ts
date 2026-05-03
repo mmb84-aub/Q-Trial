@@ -108,7 +108,9 @@ export interface ComparisonMetrics {
   qtrial_only_count: number;
   human_only_count: number;
   precision_against_qtrial: number;
+  precision_against_human: number;
   recall_against_human: number;
+  f1_against_human: number;
   novel_rate: number;
   agreement_count: number;
   partial_agreement_count: number;
