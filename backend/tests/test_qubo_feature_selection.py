@@ -210,7 +210,7 @@ class TestApplyHardConstraints:
         relevance = {c: 0.5 for c in candidates}
         
         result = apply_hard_constraints(selected_indices, candidates, relevance)
-        # min = ceil(75% of 5) = 4
+        # min = max(4, ceil(sqrt(5))) = 4
         assert len(result) >= 4
     
     def test_max_features_enforced(self):
@@ -241,7 +241,7 @@ class TestApplyHardConstraints:
         result = apply_hard_constraints(selected_indices, candidates, relevance, excluded_columns=['x2'])
         
         # With 6 candidates available and 5 selected, excluding x2 should still work
-        # (min constraint = ceil(75% of 6) = 5, and we can get 5 from 5 non-excluded)
+        # (min constraint = max(4, ceil(sqrt(6))) = 4, and we can get 4+ from 5 non-excluded)
         assert 'x2' not in result
         assert len(result) >= 4
 

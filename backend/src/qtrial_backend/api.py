@@ -191,6 +191,9 @@ def _compute_protected_columns(
     return sorted(protected)
 
 
+_MAX_ROWS = 3_000
+
+
 async def _read_dataset_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
     content = await file.read()
     fname = file.filename or ""
@@ -201,6 +204,8 @@ async def _read_dataset_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
             df = pd.read_csv(io.BytesIO(content))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+    if len(df) > _MAX_ROWS:
+        df = df.head(_MAX_ROWS)
     return df, fname
 
 
@@ -408,7 +413,7 @@ async def run_analysis_stream(
     ),
     confirmed_treatment_columns: list[str] = Form(default=[]),
     dict_file: UploadFile | None = File(None, description="Optional JSON column dictionary"),
-    feature_selection_method: str = Form("mrmr", description="Feature selection method: univariate, mrmr, lasso, elastic_net, qubo"),
+    feature_selection_method: str = Form("mrmr", description="Feature selection method: none, univariate, mrmr, lasso, elastic_net, qubo"),
 ) -> StreamingResponse:
     """
     Same as /api/run but streams Server-Sent Events so the frontend can show
@@ -483,7 +488,23 @@ async def run_analysis_stream(
 
                 method = feature_selection_method.lower()
 
-                if method == "qubo":
+                if method == "none":
+                    all_columns = list(df.columns)
+                    quantum_evidence = {
+                        "n_candidates": max(len(df.columns) - (1 if endpoint_column else 0), 0),
+                        "n_selected": len(all_columns),
+                        "selected_columns": all_columns,
+                        "excluded_columns": [],
+                        "protected_columns": protected_columns,
+                        "protected_added_columns": [],
+                        "redundancy_before": 0.0,
+                        "redundancy_after": 0.0,
+                        "redundancy_reduction_pct": 0.0,
+                        "method": "none",
+                        "selection_method": "none",
+                    }
+                    selected_df = df
+                elif method == "qubo":
                     profile = build_dataset_evidence(df)
                     quantum_evidence = run_qubo_feature_selection(df, profile, endpoint_column, 0.5)
                     quantum_evidence["method"] = "qubo"
@@ -544,10 +565,12 @@ async def run_analysis_stream(
                 selected_df = df
 
             # ── 1. Deterministic static report ───────────────────────────────
+            # Always run statistics on the full df — feature selection gates LLM
+            # context (step 4) but must never suppress statistical discovery.
             clinical_analysis_result: dict | None = None
             methodology_chapter: str | None = None
             try:
-                static_report, methodology_chapter, clinical_analysis_result = build_static_report(selected_df, dataset_name, emit=emit, quantum_evidence=quantum_evidence)
+                static_report, methodology_chapter, clinical_analysis_result = build_static_report(df, dataset_name, emit=emit, quantum_evidence=quantum_evidence)
             except Exception:
                 static_report = None
 
@@ -569,7 +592,7 @@ async def run_analysis_stream(
             # ── 2. LLM-driven statistical agent loop ─────────────────────────
             try:
                 loop_report, tool_log = run_statistical_agent_loop(
-                    selected_df, provider, dataset_name, emit=emit,
+                    df, provider, dataset_name, emit=emit,
                     model=model if provider in ("openrouter", "bedrock") else None,
                     column_dict=column_dict,
                     quantum_evidence=quantum_evidence,

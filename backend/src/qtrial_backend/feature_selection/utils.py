@@ -9,19 +9,6 @@ from sklearn.preprocessing import LabelEncoder
 logger = logging.getLogger(__name__)
 
 
-def default_feature_count(n_candidates):
-    """
-    Default selected-feature target for clinical datasets.
-
-    Small clinical datasets need enough variable coverage for report comparison,
-    while larger datasets still need meaningful dimensionality reduction.
-    """
-    if n_candidates <= 0:
-        return 0
-    coverage = 0.75 if n_candidates <= 20 else 0.55
-    return min(n_candidates, max(4, int(np.ceil(n_candidates * coverage))))
-
-
 def handle_mixed_types(df, numeric_cols=None, categorical_cols=None):
     """
     Prepare data for feature selection: encode categoricals, impute missing values.

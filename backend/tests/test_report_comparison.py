@@ -2,10 +2,12 @@ from qtrial_backend.agentic.report_comparison import (
     _candidate_match_score,
     _compare_statistical_evidence,
     _build_metrics,
+    _match_findings,
     build_comparison_report,
     normalize_qtrial_findings,
     parse_human_report_text,
 )
+import qtrial_backend.agentic.report_comparison as report_comparison
 from qtrial_backend.agentic.schemas import (
     ComparableFinding,
     FinalReportSchema,
@@ -82,6 +84,55 @@ def _finding_with_evidence(
         effect_size_label=evidence.effect_size_label,
         statistical_evidence=evidence,
     )
+
+
+def test_llm_matcher_can_pair_semantic_matches_missed_by_deterministic_score(monkeypatch) -> None:
+    qfinding = ComparableFinding(
+        finding_id="q1",
+        source="qtrial",
+        source_label="qtrial",
+        finding_text="Serum creatinine was significantly associated with mortality.",
+        normalized_text="serum creatinine significantly associated mortality",
+        variable="serum_creatinine",
+        endpoint="mortality",
+        claim_type="association_claim",
+        finding_category="analytical",
+        significant=True,
+        significance="significant",
+    )
+    hfinding = ComparableFinding(
+        finding_id="h1",
+        source="human",
+        source_label="analyst",
+        finding_text="The renal function marker was a significant predictor of death.",
+        normalized_text="renal function marker significant predictor death",
+        variable=None,
+        endpoint="mortality",
+        claim_type="association_claim",
+        finding_category="analytical",
+        significant=True,
+        significance="significant",
+    )
+
+    class FakeClient:
+        def generate(self, req):
+            class Response:
+                text = (
+                    '{"matches":[{"qtrial_id":"q1","human_id":"h1","confidence":0.91,'
+                    '"relation":"agree","rationale":"Both findings describe renal function as a mortality predictor."}]}'
+                )
+
+            return Response()
+
+    monkeypatch.setattr(report_comparison, "get_client", lambda provider: FakeClient())
+
+    matches, qtrial_only, human_only = _match_findings([qfinding], [hfinding], provider="gemini")
+
+    assert len(matches) == 1
+    assert matches[0].relation == "agree"
+    assert matches[0].pairing_confidence == 0.91
+    assert qtrial_only == []
+    assert human_only == []
 
 
 def test_parse_human_report_uses_current_section_header() -> None:
@@ -1544,3 +1595,99 @@ def test_build_metrics_counts_partial_agreement() -> None:
     assert metrics.partial_agreement_count == 1
     assert metrics.agreement_count == 0
     assert metrics.contradiction_count == 0
+    assert metrics.mcc_against_human is None
+
+
+def test_build_metrics_computes_significance_mcc_against_human() -> None:
+    matches = [
+        FindingMatch(
+            qtrial_finding=ComparableFinding(
+                finding_id="q_tp",
+                source="qtrial",
+                source_label="clinical_analysis",
+                finding_text="Age was significantly associated with mortality.",
+                normalized_text="age significantly associated mortality",
+                significant=True,
+            ),
+            human_finding=ComparableFinding(
+                finding_id="h_tp",
+                source="human",
+                source_label="analyst.txt",
+                finding_text="Age was significantly associated with mortality.",
+                normalized_text="age significantly associated mortality",
+                significant=True,
+            ),
+            relation="agree",
+            match_score=0.9,
+        ),
+        FindingMatch(
+            qtrial_finding=ComparableFinding(
+                finding_id="q_tn",
+                source="qtrial",
+                source_label="clinical_analysis",
+                finding_text="Smoking was not significantly associated with mortality.",
+                normalized_text="smoking not significantly associated mortality",
+                significant=False,
+            ),
+            human_finding=ComparableFinding(
+                finding_id="h_tn",
+                source="human",
+                source_label="analyst.txt",
+                finding_text="Smoking was not significantly associated with mortality.",
+                normalized_text="smoking not significantly associated mortality",
+                significant=False,
+            ),
+            relation="agree",
+            match_score=0.9,
+        ),
+        FindingMatch(
+            qtrial_finding=ComparableFinding(
+                finding_id="q_fp",
+                source="qtrial",
+                source_label="clinical_analysis",
+                finding_text="Diabetes was significantly associated with mortality.",
+                normalized_text="diabetes significantly associated mortality",
+                significant=True,
+            ),
+            human_finding=ComparableFinding(
+                finding_id="h_fp",
+                source="human",
+                source_label="analyst.txt",
+                finding_text="Diabetes was not significantly associated with mortality.",
+                normalized_text="diabetes not significantly associated mortality",
+                significant=False,
+            ),
+            relation="contradict",
+            match_score=0.9,
+        ),
+        FindingMatch(
+            qtrial_finding=ComparableFinding(
+                finding_id="q_fn",
+                source="qtrial",
+                source_label="clinical_analysis",
+                finding_text="Sodium was not significantly associated with mortality.",
+                normalized_text="sodium not significantly associated mortality",
+                significant=False,
+            ),
+            human_finding=ComparableFinding(
+                finding_id="h_fn",
+                source="human",
+                source_label="analyst.txt",
+                finding_text="Sodium was significantly associated with mortality.",
+                normalized_text="sodium significantly associated mortality",
+                significant=True,
+            ),
+            relation="contradict",
+            match_score=0.9,
+        ),
+    ]
+
+    metrics = _build_metrics(
+        qtrial_findings=[match.qtrial_finding for match in matches],
+        human_findings=[match.human_finding for match in matches],
+        matches=matches,
+        qtrial_only=[],
+        human_only=[],
+    )
+
+    assert metrics.mcc_against_human == 0.0
