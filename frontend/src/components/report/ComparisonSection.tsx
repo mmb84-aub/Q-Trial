@@ -18,6 +18,8 @@ const RELATION_STYLES: Record<FindingMatch["relation"], { background: string; co
 
 const METRIC_CARDS: Array<{ key: keyof ComparisonReport["metrics"]; label: string; format?: (value: number) => string }> = [
   { key: "matched_pairs", label: "Matched findings" },
+  { key: "precision_against_qtrial", label: "Precision", format: formatPercent },
+  { key: "recall_against_human", label: "Recall", format: formatPercent },
   { key: "qtrial_only_count", label: "Q-Trial only" },
   { key: "human_only_count", label: "Human only" },
   { key: "agreement_count", label: "Agreements" },

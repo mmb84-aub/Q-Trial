@@ -514,6 +514,7 @@ def _build_metrics(
         matched_pairs=matched_pairs,
         qtrial_only_count=len(qtrial_only),
         human_only_count=len(human_only),
+        precision_against_qtrial=_ratio(matched_pairs, total_qtrial),
         recall_against_human=_ratio(matched_pairs, total_human),
         novel_rate=_ratio(len(qtrial_only), total_qtrial),
         agreement_count=agreement_count,

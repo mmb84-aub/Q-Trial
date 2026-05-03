@@ -9,6 +9,7 @@ export const initialState: PipelineState = {
   outcomeColumn: "",
   provider: "gemini",
   model: "",
+  featureSelectionMethod: "mrmr",
   detectedTreatmentColumns: [],
   confirmedTreatmentColumns: [],
   progressMessages: [],
@@ -36,6 +37,8 @@ export function reducer(state: PipelineState, action: PipelineAction): PipelineS
       return { ...state, outcomeColumn: action.payload };
     case "SET_PROVIDER":
       return { ...state, provider: action.payload.provider, model: action.payload.model };
+    case "SET_FEATURE_SELECTION_METHOD":
+      return { ...state, featureSelectionMethod: action.payload };
     case "START_UPLOAD":
       return { ...state, stage: "uploading" };
     case "TREATMENT_DETECTED":
