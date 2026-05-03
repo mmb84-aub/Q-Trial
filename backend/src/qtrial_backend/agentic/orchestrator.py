@@ -636,6 +636,8 @@ def run_agentic_insights(
     methodology_chapter: str | None = None,
     analyst_report_text: str | None = None,
     analyst_report_name: str | None = None,
+    *,
+    original_df: pd.DataFrame | None = None,
 ) -> FinalReportSchema:
     """
     Run the Q-Trial pipeline as specified in the design document.
@@ -1073,7 +1075,10 @@ def run_agentic_insights(
             report = report.model_copy(
                 update={
                     "statistical_verification_report": build_statistical_verification_report(
-                        df=df,
+                        # Use the full pre-feature-selection dataset so analyst claims
+                        # about variables that were dropped from the analysis pipeline
+                        # can still be statistically verified against the raw data.
+                        df=original_df if original_df is not None else df,
                         qtrial_findings=normalize_qtrial_findings(report),
                         analyst_report_text=analyst_report_text,
                         analyst_report_name=analyst_report_name,

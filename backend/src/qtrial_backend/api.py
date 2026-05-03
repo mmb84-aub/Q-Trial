@@ -380,6 +380,7 @@ async def run_analysis(
             methodology_chapter,
             analyst_report_text,
             analyst_report_name,
+            original_df=df,
         )
     except Exception as exc:
         raise HTTPException(
@@ -602,6 +603,7 @@ async def run_analysis_stream(
                 methodology_chapter,
                 analyst_report_text,
                 analyst_report_name,
+                original_df=df,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,
