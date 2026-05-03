@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/literature/citation_manager.py
+# hypothesis_version: 6.151.9
+
+['action', 'already_registered', 'authors', 'check', 'citation_manager', 'citations', 'entry', 'is_registered', 'key_finding', 'list', 'literature', 'message', 'n_registered', 'n_total_registered', 'paper_id', 'register', 'registered', 'reminder', 'source', 'status', 'title', 'year']

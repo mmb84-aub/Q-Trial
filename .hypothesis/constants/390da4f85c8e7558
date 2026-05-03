@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/literature/cochrane.py
+# hypothesis_version: 6.151.9
+
+[800, 'Accept', 'abstract', 'application/json', 'authors', 'doi', 'id', 'name', 'pmid', 'publicationDate', 'q', 'results', 'review', 'rows', 'start', 'title', 'type', 'year']

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { FeatureSelectionMethodPicker } from "./FeatureSelectionMethodPicker";
 
 // Well-known OpenRouter models the user can pick from, plus a free-text option
 const OPENROUTER_MODELS = [
@@ -39,6 +40,7 @@ interface Props {
     outcomeColumn: string,
     provider: string,
     model: string,
+    featureSelectionMethod: string,
   ) => void;
 }
 
@@ -52,6 +54,7 @@ export function UploadForm({ studyContext, onDetect }: Props) {
   const [orModel, setOrModel] = useState(OPENROUTER_MODELS[0].id);
   const [bedrockModel, setBedrockModel] = useState(BEDROCK_MODELS[0].id);
   const [customModel, setCustomModel] = useState("");
+  const [featureSelectionMethod, setFeatureSelectionMethod] = useState("mrmr");
 
   function resolvedModel(): string {
     if (provider === "openrouter") return orModel === "custom" ? customModel.trim() : orModel;
@@ -61,7 +64,7 @@ export function UploadForm({ studyContext, onDetect }: Props) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (file) onDetect(file, dictFile, analystReportFile, outcomeColumn, provider, resolvedModel());
+    if (file) onDetect(file, dictFile, analystReportFile, outcomeColumn, provider, resolvedModel(), featureSelectionMethod);
   }
 
   const needsCustom = (provider === "openrouter" && orModel === "custom") ||
@@ -278,6 +281,12 @@ export function UploadForm({ studyContext, onDetect }: Props) {
             </p>
           </div>
         )}
+
+        {/* Feature Selection Method Picker */}
+        <FeatureSelectionMethodPicker
+          selectedMethod={featureSelectionMethod}
+          onChange={setFeatureSelectionMethod}
+        />
 
         <button
           type="submit"

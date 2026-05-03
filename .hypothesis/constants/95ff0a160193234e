@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/baseline_balance.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.1, 'arms', 'baseline_balance', 'categorical', 'continuous', 'group_sizes', 'imbalanced', 'imbalanced_variables', 'interpretation', 'mean', 'median', 'n', 'n_imbalanced', 'n_variables', 'proportions', 'sd', 'smd', 'smd_threshold', 'stats', 'table', 'treatment_column', 'type', 'variable']

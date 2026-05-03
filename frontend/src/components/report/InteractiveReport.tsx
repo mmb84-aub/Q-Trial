@@ -19,14 +19,14 @@ export function InteractiveReport({ report, onReset }: Props) {
   const excluded = report.treatment_columns_excluded ?? [];
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: "2rem" }}>
+    <main className="report-print-root" style={{ maxWidth: 900, margin: "0 auto", padding: "2rem" }}>
       {/* Top bar */}
-      <div style={{
+      <div className="no-print" style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
         marginBottom: "1.5rem", flexWrap: "wrap", gap: "0.75rem",
       }}>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <PDFExportButton report={report} />
+          <PDFExportButton />
           <ReproducibilityLogDownload report={report} />
           <ADLViewerButton />
         </div>

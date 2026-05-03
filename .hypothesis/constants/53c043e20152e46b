@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/crosstab.py
+# hypothesis_version: 6.151.9
+
+[0.1, 0.3, 0.5, 'Chi-square', "Fisher's exact", 'Return proportions', 'all', 'col_column', 'cramers_v', 'cramers_v_magnitude', 'cross_tabulation', 'degrees_of_freedom', 'large', 'medium', 'min_expected_cell', 'n_total', 'negligible', 'normalized', 'p_value', 'reason', 'row_column', 'significance_test', 'small', 'statistic', 'stats', 'table', 'test', 'test_error']

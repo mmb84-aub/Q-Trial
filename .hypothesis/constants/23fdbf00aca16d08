@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/digit_preference.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.05, 100, 'chi_square', 'clean_columns', 'column', 'digit_counts', 'dominant_digit', 'dominant_digit_pct', 'flagged_columns', 'integrity_concern', 'number', 'p_value', 'stats']

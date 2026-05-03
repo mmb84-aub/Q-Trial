@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/missing.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.05, 1.0, 100, 'Complete data', 'MCAR', 'N/A', 'Not MCAR', 'chi_square', 'classification', 'complete_rows', 'degrees_of_freedom', 'df', 'interpretation', 'little', 'little_mcar_test', 'missing_columns', 'n_patterns', 'nan', 'null_count', 'null_pct', 'number', 'p_value', 'per_column', 'pvalue', 'recommendation', 'rows_with_any_null', 'rows_with_most_nulls', 'statistic', 'stats', 'test_determines', 'test_used', 'total_cols', 'total_rows']

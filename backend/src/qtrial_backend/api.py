@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import re
 import threading
 import traceback
 from pathlib import Path
@@ -57,6 +58,159 @@ def _load_column_dict(dataset_name: str) -> dict[str, str] | None:
             except Exception:
                 pass
     return None
+
+
+def _normalize_column_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _is_binary_like(series: pd.Series) -> bool:
+    return series.dropna().nunique() <= 3
+
+
+def _resolve_endpoint_column(df: pd.DataFrame, meta: MetadataInput | None) -> str | None:
+    if df.empty:
+        return None
+
+    normalized_columns = {_normalize_column_name(col): col for col in df.columns}
+
+    if meta and meta.primary_endpoint:
+        if meta.primary_endpoint in df.columns:
+            return meta.primary_endpoint
+        normalized_meta = _normalize_column_name(meta.primary_endpoint)
+        if normalized_meta in normalized_columns:
+            return normalized_columns[normalized_meta]
+
+    strong_endpoint_names = {
+        "deathevent",
+        "death",
+        "mortality",
+        "outcome",
+        "survived",
+        "response",
+    }
+    weak_endpoint_names = {"event", "status"}
+
+    best_match: tuple[int, str] | None = None
+    for col in df.columns:
+        normalized = _normalize_column_name(col)
+        binary_like = _is_binary_like(df[col])
+        score = 0
+
+        if normalized in strong_endpoint_names:
+            score = 4
+        elif normalized in weak_endpoint_names and binary_like:
+            score = 3
+        elif binary_like and any(token in normalized for token in ("death", "mortality", "surviv")):
+            score = 2
+
+        if score and (best_match is None or score > best_match[0]):
+            best_match = (score, col)
+
+    return best_match[1] if best_match else None
+
+
+def _preserve_endpoint_missingness(
+    missingness_disclosures: dict[str, Any],
+    endpoint_column: str | None,
+) -> list[str]:
+    excluded_cols = [col for col, disclosure in missingness_disclosures.items() if disclosure.action == "excluded"]
+    if endpoint_column and endpoint_column in missingness_disclosures:
+        disclosure = missingness_disclosures[endpoint_column]
+        if disclosure.action == "excluded":
+            disclosure.action = "high_missingness_section"
+        disclosure.excluded_from_primary_analysis = False
+        excluded_cols = [col for col in excluded_cols if col != endpoint_column]
+    return excluded_cols
+
+
+def _ensure_endpoint_selected(
+    df: pd.DataFrame,
+    quantum_evidence: dict | None,
+    endpoint_column: str | None,
+    protected_columns: list[str] | None = None,
+) -> pd.DataFrame:
+    if quantum_evidence is None:
+        return df
+
+    selected_columns = list(quantum_evidence.get("selected_columns") or [])
+    protected_columns = [c for c in (protected_columns or []) if c in df.columns]
+    if endpoint_column and endpoint_column in df.columns and endpoint_column not in selected_columns:
+        selected_columns.append(endpoint_column)
+        quantum_evidence["selected_columns"] = selected_columns
+        quantum_evidence["n_selected"] = len(selected_columns)
+        excluded_columns = list(quantum_evidence.get("excluded_columns") or [])
+        quantum_evidence["excluded_columns"] = [
+            col for col in excluded_columns if col != endpoint_column
+        ]
+
+    added_protected = [c for c in protected_columns if c not in selected_columns]
+    if added_protected:
+        selected_columns.extend(added_protected)
+        quantum_evidence["selected_columns"] = selected_columns
+        quantum_evidence["n_selected"] = len(selected_columns)
+        excluded_columns = list(quantum_evidence.get("excluded_columns") or [])
+        quantum_evidence["excluded_columns"] = [col for col in excluded_columns if col not in added_protected]
+        quantum_evidence["protected_columns"] = protected_columns
+        quantum_evidence["protected_added_columns"] = added_protected
+
+    return df[selected_columns] if selected_columns else df
+
+
+_CLINICAL_PROTECTED_HINTS = re.compile(
+    r"\b(age|sex|gender|sodium|na\b|creatinine|egfr|ejection|ef\b|blood\s+pressure|sbp|dbp|"
+    r"diabet|anaemi|hypertens|smok|mortality|death|surviv|treat|dose|baseline|severity|"
+    r"biomarker|lab|platelet|hemoglobin|cpk|creatinine\s+phosphokinase)\b",
+    re.IGNORECASE,
+)
+
+
+def _compute_protected_columns(
+    df: pd.DataFrame,
+    *,
+    endpoint_column: str | None,
+    analyst_report_text: str | None,
+    column_dict: dict[str, str] | None,
+    meta: MetadataInput | None,
+) -> list[str]:
+    """Return clinically important variables that feature selection should preserve."""
+    protected: set[str] = set()
+    if endpoint_column and endpoint_column in df.columns:
+        protected.add(endpoint_column)
+    if meta and meta.important_variables:
+        for v in meta.important_variables:
+            if v in df.columns:
+                protected.add(v)
+            else:
+                norm_v = _normalize_column_name(v)
+                for col in df.columns:
+                    if _normalize_column_name(col) == norm_v:
+                        protected.add(col)
+                        break
+
+    # Protect clinically important variables by name or data dictionary semantics.
+    for col in df.columns:
+        if _CLINICAL_PROTECTED_HINTS.search(col):
+            protected.add(col)
+            continue
+        if column_dict:
+            desc = column_dict.get(col) or ""
+            if desc and _CLINICAL_PROTECTED_HINTS.search(desc):
+                protected.add(col)
+
+    # If a human analyst report is provided, protect mentioned variables so they remain analyzable/comparable.
+    if analyst_report_text:
+        lowered = analyst_report_text.lower()
+        for col in df.columns:
+            token = col.lower()
+            if len(token) >= 4 and token in lowered:
+                protected.add(col)
+                continue
+            normalized = _normalize_column_name(col)
+            if len(normalized) >= 4 and normalized in _normalize_column_name(lowered):
+                protected.add(col)
+
+    return sorted(protected)
 
 
 async def _read_dataset_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
@@ -172,10 +326,11 @@ async def run_analysis(
     # ── Run static statistical report first (deterministic, no LLM) ─────────
     dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
     column_dict = _load_column_dict(dataset_name)
+    endpoint_column = _resolve_endpoint_column(df, meta)
 
     # ── Classify missingness and drop >50% columns ───────────────────────────
     missingness_disclosures = classify_missingness(df)
-    excluded_cols = [col for col, d in missingness_disclosures.items() if d.action == "excluded"]
+    excluded_cols = _preserve_endpoint_missingness(missingness_disclosures, endpoint_column)
     if excluded_cols:
         df = df.drop(columns=excluded_cols)
 
@@ -185,11 +340,17 @@ async def run_analysis(
     try:
         from qtrial_backend.dataset.evidence import build_dataset_evidence
         profile = build_dataset_evidence(df)
-        outcome_column = meta.outcome_column if meta and meta.outcome_column else None
         quantum_evidence = await asyncio.to_thread(
-            run_qubo_feature_selection, df, profile, outcome_column, 0.5
+            run_qubo_feature_selection, df, profile, endpoint_column, 0.5
         )
-        selected_df = df[quantum_evidence["selected_columns"]]
+        protected_columns = _compute_protected_columns(
+            df,
+            endpoint_column=endpoint_column,
+            analyst_report_text=analyst_report_text,
+            column_dict=column_dict,
+            meta=meta,
+        )
+        selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column, protected_columns)
         console.print(
             f"[green]✓ Feature selection:[/green] "
             f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} columns "
@@ -268,6 +429,7 @@ async def run_analysis_stream(
     ),
     confirmed_treatment_columns: list[str] = Form(default=[]),
     dict_file: UploadFile | None = File(None, description="Optional JSON column dictionary"),
+    feature_selection_method: str = Form("mrmr", description="Feature selection method: univariate, mrmr, lasso, elastic_net, qubo"),
 ) -> StreamingResponse:
     """
     Same as /api/run but streams Server-Sent Events so the frontend can show
@@ -293,10 +455,11 @@ async def run_analysis_stream(
     loop = asyncio.get_running_loop()
     aq: asyncio.Queue = asyncio.Queue()
     dataset_name = fname.rsplit(".", 1)[0] if fname else "dataset"
+    endpoint_column = _resolve_endpoint_column(df, meta)
 
     # Classify missingness and drop >50% columns before pipeline
     missingness_disclosures = classify_missingness(df)
-    excluded_cols = [col for col, d in missingness_disclosures.items() if d.action == "excluded"]
+    excluded_cols = _preserve_endpoint_missingness(missingness_disclosures, endpoint_column)
     if excluded_cols:
         df = df.drop(columns=excluded_cols)
 
@@ -319,19 +482,61 @@ async def run_analysis_stream(
         set_openrouter_model(model if provider == "openrouter" else None)
         set_bedrock_model(model if provider == "bedrock" else None)
         try:
-            # ── 0. QUBO Feature Selection ─────────────────────────────────────
+            # ── 0. Feature Selection ──────────────────────────────────────────
             quantum_evidence = None
             selected_df = df
             try:
                 from qtrial_backend.dataset.evidence import build_dataset_evidence
-                profile = build_dataset_evidence(df)
-                outcome_column = meta.outcome_column if meta and meta.outcome_column else None
-                quantum_evidence = run_qubo_feature_selection(df, profile, outcome_column, 0.5)
-                selected_df = df[quantum_evidence["selected_columns"]]
+                from qtrial_backend.feature_selection import select_features
+                protected_columns = _compute_protected_columns(
+                    df,
+                    endpoint_column=endpoint_column,
+                    analyst_report_text=analyst_report_text,
+                    column_dict=column_dict,
+                    meta=meta,
+                )
+                protected_columns = list(
+                    dict.fromkeys(
+                        protected_columns
+                        + [col for col in confirmed_treatment_columns if col in df.columns]
+                    )
+                )
+
+                method = feature_selection_method.lower()
+
+                if method == "qubo":
+                    profile = build_dataset_evidence(df)
+                    quantum_evidence = run_qubo_feature_selection(df, profile, endpoint_column, 0.5)
+                    quantum_evidence["method"] = "qubo"
+                    selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column, protected_columns)
+                else:
+                    fs_result = select_features(df, outcome_column=endpoint_column, method=method)
+                    selected_features = [
+                        col for col in fs_result.get("selected_features", []) if col in df.columns
+                    ]
+                    selected_columns = list(dict.fromkeys(selected_features + protected_columns))
+                    excluded_columns = [col for col in df.columns if col not in selected_columns]
+                    quantum_evidence = {
+                        "n_candidates": max(len(df.columns) - (1 if endpoint_column else 0), 0),
+                        "n_selected": len(selected_columns),
+                        "selected_columns": selected_columns,
+                        "excluded_columns": excluded_columns,
+                        "protected_columns": protected_columns,
+                        "protected_added_columns": [
+                            col for col in protected_columns if col not in selected_features
+                        ],
+                        "redundancy_before": fs_result.get("redundancy_measure", 0),
+                        "redundancy_after": fs_result.get("redundancy_measure", 0),
+                        "redundancy_reduction_pct": 0,
+                        "method": method,
+                        "selection_method": method,
+                    }
+                    selected_df = df[selected_columns] if selected_columns else df
+
                 console.print(
                     f"[green]✓ Feature selection:[/green] "
-                    f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} "
-                    f"features (redundancy reduced by {quantum_evidence['redundancy_reduction_pct']:.1f}%)"
+                    f"Method={method}, "
+                    f"Selected {quantum_evidence['n_selected']} from {quantum_evidence['n_candidates']} features"
                 )
             except Exception as exc:
                 console.print(f"[yellow]⚠ Feature selection warning: {exc}[/yellow]")

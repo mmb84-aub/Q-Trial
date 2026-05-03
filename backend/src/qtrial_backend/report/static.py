@@ -16,6 +16,7 @@ import pandas as pd
 from rich.console import Console
 
 from qtrial_backend.agent.context import AgentContext
+from qtrial_backend.agentic.finding_categories import is_user_facing_nonfinding_artifact
 
 console = Console()
 
@@ -67,10 +68,15 @@ _EVENT_HINTS = re.compile(
 
 def _detect_treatment_col(df: pd.DataFrame) -> str | None:
     for col in df.columns:
+        # Avoid misclassifying endpoints as treatment.
+        if _EVENT_HINTS.search(col):
+            continue
         if _TREATMENT_HINTS.search(col) and 2 <= df[col].nunique() <= 6:
             return col
     # Fallback: any binary-ish column with 2-3 unique values
     for col in df.columns:
+        if _EVENT_HINTS.search(col):
+            continue
         if 2 <= df[col].nunique() <= 3:
             return col
     return None
@@ -381,7 +387,15 @@ def _section_baseline_balance(ctx: AgentContext, treatment_col: str) -> str:
     df = ctx.dataframe
     baseline_cols = [c for c in df.columns if c != treatment_col]
 
-    lines = [f"## 7. Baseline Balance (treatment = `{treatment_col}`)", ""]
+    # This section is used both for true treatment-arm comparisons and for
+    # outcome-stratified comparisons when only an endpoint column is available.
+    label = "Baseline Balance"
+    normalized = re.sub(r"[^a-z0-9]+", "", (treatment_col or "").lower())
+    if _EVENT_HINTS.search(treatment_col) or normalized in {"deathevent", "mortality", "death", "outcome"}:
+        label = f"Baseline Differences by Outcome Group (`{treatment_col}`)"
+    else:
+        label = f"Baseline Balance by Group (`{treatment_col}`)"
+    lines = [f"## 7. {label}", ""]
 
     r = _call(
         baseline_balance,
@@ -883,7 +897,10 @@ def _section_clinical_analysis(result: dict) -> str:
     lines.append(f"- Hierarchical gate open: **{s3.get('hierarchical_gate_open', 'N/A')}**")
     lines.append("")
 
-    findings = s3.get("corrected_findings", [])
+    findings = [
+        finding for finding in s3.get("corrected_findings", [])
+        if not is_user_facing_nonfinding_artifact(finding)
+    ]
     if findings:
         header = ["Endpoint", "Type", "Raw p", "Adjusted p", "Method", "Effect size", "OR",
                   "95% CI", "Power", "Req. n (80%)", "Significant"]
@@ -920,7 +937,7 @@ def _section_clinical_analysis(result: dict) -> str:
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def _section_variable_selection(quantum_evidence: dict) -> str:
-    """Generate Variable Selection section from QUBO feature selection results."""
+    """Generate Variable Selection section from feature selection results."""
     lines = ["## Variable Selection"]
 
     n_selected = quantum_evidence.get("n_selected", 0)
@@ -930,18 +947,35 @@ def _section_variable_selection(quantum_evidence: dict) -> str:
     redundancy_reduction_pct = quantum_evidence.get("redundancy_reduction_pct", 0.0)
     selected_columns = quantum_evidence.get("selected_columns", [])
     excluded_columns = quantum_evidence.get("excluded_columns", [])
-    selection_method = quantum_evidence.get("selection_method", "qubo")
+    selection_method = quantum_evidence.get("method") or quantum_evidence.get("selection_method", "qubo")
+    method_labels = {
+        "qubo": "QUBO-based combinatorial optimisation",
+        "greedy_diversity": "greedy diversity fallback selection",
+        "error_fallback": "fallback feature selection",
+        "relevance_fallback": "relevance fallback selection",
+        "mrmr": "mRMR feature selection",
+        "univariate": "univariate statistical feature selection",
+        "lasso": "LASSO feature selection",
+        "elastic_net": "Elastic Net feature selection",
+    }
+    method_label = method_labels.get(str(selection_method), str(selection_method))
 
     lines.append(
         f"\nBefore statistical analysis, **{n_selected} variables** were selected from "
-        f"**{n_candidates}** total using QUBO-based combinatorial optimisation. "
+        f"**{n_candidates}** total using {method_label}. "
         f"This reduces redundancy between variables and focuses the analysis on the "
         f"strongest signals relative to the outcome."
     )
-    lines.append(
-        f"\nMean correlation between variables reduced from **{redundancy_before*100:.1f}%** "
-        f"to **{redundancy_after*100:.1f}%** (**{redundancy_reduction_pct:.1f}%** reduction)."
-    )
+    before_pct = redundancy_before * 100
+    after_pct = redundancy_after * 100
+    delta_pct = after_pct - before_pct
+    if delta_pct < 0:
+        change_text = f"decreased from **{before_pct:.1f}%** to **{after_pct:.1f}%** (**{abs(delta_pct):.1f}%** absolute decrease)."
+    elif delta_pct > 0:
+        change_text = f"increased from **{before_pct:.1f}%** to **{after_pct:.1f}%** (**{delta_pct:.1f}%** absolute increase)."
+    else:
+        change_text = f"remained unchanged at **{before_pct:.1f}%**."
+    lines.append(f"\nMean correlation between variables {change_text}")
     if selection_method == "relevance_fallback":
         lines.append(
             "\n> ⚠️ **Note:** Solver redundancy reduction was insufficient; fallback to top "
@@ -985,9 +1019,12 @@ def build_static_report(
     )
 
     # Auto-detect clinical structure
-    treatment_col = _detect_treatment_col(df)
     time_col = _detect_time_col(df)
     event_col = _detect_event_col(df, time_col) if time_col else None
+    treatment_col = _detect_treatment_col(df)
+    if treatment_col and event_col and treatment_col == event_col:
+        # Never call the endpoint a treatment arm.
+        treatment_col = None
 
     _det = []
     if treatment_col: _det.append(f"treatment=[bold]{treatment_col}[/bold]")
@@ -1037,7 +1074,7 @@ def build_static_report(
         _run("Normality Tests",   _section_normality,      ctx),
         "",
         _run("Correlation Matrix",_section_correlation,    ctx),
-    ]
+    ])
 
     if treatment_col:
         sections += ["", _run("Baseline Balance", _section_baseline_balance, ctx, treatment_col)]

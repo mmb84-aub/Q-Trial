@@ -242,6 +242,22 @@ class MetadataInput(BaseModel):
         default=None,
         description="Confirmed primary endpoint description.",
     )
+    time_column: str | None = Field(
+        default=None,
+        description="Confirmed time-to-event or follow-up time column.",
+    )
+    event_column: str | None = Field(
+        default=None,
+        description="Confirmed event/status endpoint column for survival analysis.",
+    )
+    event_codes: list[int] | None = Field(
+        default=None,
+        description="Codes in the event column that should count as events for survival analysis.",
+    )
+    group_column: str | None = Field(
+        default=None,
+        description="Confirmed grouping column for group comparisons or log-rank tests.",
+    )
     time_unit: str | None = Field(
         default=None,
         description="Unit for time-to-event columns: 'days', 'months', or 'years'.",
@@ -669,6 +685,46 @@ class AgentRunRecord(BaseModel):
     output: dict[str, Any]
 
 
+class StatisticalVerificationMetrics(BaseModel):
+    total_claims: int = 0
+    verified_count: int = 0
+    contradicted_count: int = 0
+    partial_count: int = 0
+    unsupported_count: int = 0
+    not_verifiable_count: int = 0
+    verification_rate: float = 0.0
+    contradiction_rate: float = 0.0
+
+
+class VerifiedClaim(BaseModel):
+    claim_id: str
+    source_text: str
+    label: Literal["verified", "contradicted", "partial", "unsupported", "not_verifiable"]
+    variable: str | None = None
+    endpoint: str | None = None
+    test_used: str | None = None
+    recomputed_p_value: float | None = None
+    reported_p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    reported_effect_size: float | None = None
+    reported_effect_size_label: str | None = None
+    reported_ci_lower: float | None = None
+    reported_ci_upper: float | None = None
+    effect_agreement: Literal["agrees", "conflicts", "partial", "not_assessed"] | None = None
+    confidence_warnings: list[str] = Field(default_factory=list)
+    rationale: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StatisticalVerificationReport(BaseModel):
+    summary: str = ""
+    metrics: StatisticalVerificationMetrics = Field(default_factory=StatisticalVerificationMetrics)
+    claims: list[VerifiedClaim] = Field(default_factory=list)
+
+
 class FinalReportSchema(BaseModel):
     provider: str
     model: str
@@ -751,6 +807,10 @@ class FinalReportSchema(BaseModel):
             "stage_2_analysis, stage_3_corrections, and clinical_summary."
         ),
     )
+    statistical_verification_report: StatisticalVerificationReport | None = Field(
+        default=None,
+        description="Optional dataset-grounded statistical verification report for extracted claims.",
+    )
     comparison_report: ComparisonReport | None = Field(
         default=None,
         description="Optional comparison between Q-Trial findings and an uploaded human analyst report.",
@@ -767,6 +827,18 @@ class ClinicalSearchTerm(BaseModel):
     comparison_claim_text: str | None = None
     finding_category: FindingCategory = "analytical"
     claim_type: ClaimType = "association_claim"
+    variable: str | None = None
+    endpoint: str | None = None
+    direction: Literal["positive", "negative", "none", "unknown"] = "unknown"
+    direction_label: str | None = None
+    significant: bool | None = None
+    significance: Literal["significant", "not_significant", "unclear"] = "unclear"
+    p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    test_type: str | None = None
+    confidence_warning: str | list[str] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     term: str
     study_context_used: str
     translation_failed: bool = False
@@ -792,6 +864,16 @@ class GroundedFinding(BaseModel):
     grounding_status: GroundingStatusLabel
     finding_category: FindingCategory = "analytical"
     claim_type: ClaimType = "association_claim"
+    variable: str | None = None
+    endpoint: str | None = None
+    direction: Literal["positive", "negative", "none", "unknown"] = "unknown"
+    direction_label: str | None = None
+    significant: bool | None = None
+    significance: Literal["significant", "not_significant", "unclear"] = "unclear"
+    p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    test_type: str | None = None
     citations: list[LiteratureArticle] = Field(default_factory=list)
     evidence_strength: EvidenceStrengthScore | None = None
     novel_statement: str | None = None
@@ -800,6 +882,7 @@ class GroundedFinding(BaseModel):
     test_selection_rationale: str | None = None
     missingness_disclosure: str | None = None
     confidence_warning: str | list[str] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── New schemas: Research Questions, Synthesis, Missingness ──────────────────
@@ -863,6 +946,68 @@ class GroundedFindingsSchema(BaseModel):
 
 # ── Report comparison schemas ────────────────────────────────────────────────
 
+class StatisticalEvidence(BaseModel):
+    variable: str | None = None
+    endpoint: str | None = None
+    test_type: str | None = None
+    test_family: str | None = None
+    p_value: float | None = None
+    p_operator: str | None = None
+    adjusted_p_value: float | None = None
+    raw_p_value: float | None = None
+    effect_size: float | None = None
+    effect_size_label: str | None = None
+    effect_direction: Literal["positive", "negative", "none", "unknown"] = "unknown"
+    direction_effect_on_endpoint: Literal[
+        "increases_endpoint_risk",
+        "decreases_endpoint_risk",
+        "no_direction",
+        "unknown",
+    ] = "unknown"
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    confidence_level: float | None = None
+    statistic_value: float | None = None
+    statistic_label: str | None = None
+    significant: bool | None = None
+    direction: Literal["positive", "negative", "none", "unknown"] = "unknown"
+    sample_size: int | None = None
+    covariates: list[str] = Field(default_factory=list)
+    rank: int | None = None
+    importance_score: float | None = None
+    extraction_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    source_text: str = ""
+
+
+class StatisticalEvidenceComparison(BaseModel):
+    # This composite reports agreement between already-paired statistical
+    # evidence. It is intentionally transparent and component-based; it is not
+    # claimed to be a universal clinical-report metric.
+    available: bool = False
+    reason_if_unavailable: str | None = None
+    statistical_agreement_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    statistical_agreement_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+    overall_statistical_agreement_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    agreement_label: Literal["strong", "moderate", "weak", "contradiction", "not_assessed"] = "not_assessed"
+    significance_agreement: str = "not_assessed"
+    direction_agreement: str = "not_assessed"
+    effect_size_agreement: str = "not_assessed"
+    p_value_agreement: str = "not_assessed"
+    ci_agreement: str = "not_assessed"
+    test_type_agreement: str = "not_assessed"
+    rank_agreement: str = "not_assessed"
+    effect_size_delta: float | None = None
+    effect_size_relative_delta: float | None = None
+    p_value_delta: float | None = None
+    p_value_log_delta: float | None = None
+    ci_overlap: bool | None = None
+    coverage_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    qtrial_evidence: StatisticalEvidence | None = None
+    human_evidence: StatisticalEvidence | None = None
+    notes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ComparableFinding(BaseModel):
     finding_id: str
     source: Literal["qtrial", "human"]
@@ -884,19 +1029,30 @@ class ComparableFinding(BaseModel):
     evidence_label: str = ""
     citations_present: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
+    statistical_evidence: StatisticalEvidence | None = None
 
 
 class FindingMatch(BaseModel):
     qtrial_finding: ComparableFinding
     human_finding: ComparableFinding
     relation: Literal["agree", "partial_agree", "contradict"]
-    match_score: float = Field(..., ge=0.0, le=1.0)
+    pairing_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    match_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Backward-compatible alias for pairing confidence. This estimates whether the "
+            "two findings refer to the same claim; it is not an agreement score."
+        ),
+    )
     rationale: str = ""
     qtrial_evidence_stronger: bool = False
     matched_by: Literal["variable", "variable+endpoint", "lexical_fallback"] = "lexical_fallback"
     variable_detected: bool = False
     endpoint_detected: bool = False
     text_used_for_matching: dict[str, str] = Field(default_factory=dict)
+    statistical_comparison: StatisticalEvidenceComparison | None = None
 
 
 class ComparisonMetrics(BaseModel):
@@ -906,6 +1062,8 @@ class ComparisonMetrics(BaseModel):
     qtrial_only_count: int = 0
     human_only_count: int = 0
     recall_against_human: float = 0.0
+    precision_against_human: float = 0.0
+    f1_against_human: float = 0.0
     novel_rate: float = 0.0
     agreement_count: int = 0
     partial_agreement_count: int = 0
@@ -913,8 +1071,8 @@ class ComparisonMetrics(BaseModel):
     agreement_rate_over_matched: float = 0.0
     contradiction_rate_over_matched: float = 0.0
     evidence_upgrade_rate: float = 0.0
-    mcc: float | None = None
-    mcc_interpretation: str | None = None
+    average_statistical_agreement_score: float | None = None
+    average_statistical_evidence_coverage: float = 0.0
 
 
 class HumanReportParseResult(BaseModel):

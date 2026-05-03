@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/agentic/literature_validator.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.35, 0.5, 300, 'Contradicted', 'Novel', 'Supported', '[a-z0-9]+', '```', '```json', 'abstract', 'after', 'analysis', 'and', 'are', 'associated', 'authors', 'before', 'between', 'clinicaltrials', 'cochrane', 'during', 'finding', 'findings', 'for', 'from', 'gemini', 'had', 'has', 'have', 'into', 'mortality', 'nct_id', 'outcome', 'over', 'patient', 'patients', 'pmid', 'pubmed', 'rationale', 'risk', 'search_query', 'semantic_scholar', 'significant', 'statistically', 'status', 'study', 'survival', 'temperature', 'than', 'that', 'the', 'their', 'then', 'there', 'these', 'this', 'those', 'threading', 'title', 'trial', 'under', 'was', 'were', 'with', 'year', '…']

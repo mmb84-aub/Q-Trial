@@ -5,33 +5,14 @@ interface Props {
   report: FinalReport;
 }
 
-export function PDFExportButton({ report }: Props) {
-  const [loading, setLoading] = useState(false);
-
-  async function handleExport() {
-    setLoading(true);
-    try {
-      const form = new FormData();
-      form.append("report_json", JSON.stringify(report));
-      const res = await fetch("/api/report/pdf", { method: "POST", body: form });
-      if (!res.ok) throw new Error("PDF generation failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "report.pdf";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("PDF export is temporarily unavailable. Your interactive report is still accessible.");
-    } finally {
-      setLoading(false);
-    }
+export function PDFExportButton() {
+  function handleExport() {
+    window.print();
   }
 
   return (
-    <button onClick={handleExport} disabled={loading} style={{ marginRight: "0.5rem" }}>
-      {loading ? "Generating PDF…" : "Export PDF"}
+    <button onClick={handleExport} style={{ marginRight: "0.5rem" }}>
+      Export PDF
     </button>
   );
 }
