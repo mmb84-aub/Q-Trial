@@ -33,6 +33,9 @@ _CLIFF_THRESHOLDS = [
     (float("inf"), "large"),
 ]
 
+_MAX_BOOTSTRAP_OBS = 3000
+_MAX_CLIFF_PAIRS = 200_000
+
 
 def _magnitude(value: float, thresholds: list) -> str:
     for cutoff, label in thresholds:
@@ -129,6 +132,30 @@ def effect_size(params: EffectSizeParams, ctx: AgentContext) -> dict:
 
     method = params.method.lower()
     rng = np.random.default_rng(42)
+    notes: list[str] = []
+
+    bootstrap_ci = params.bootstrap_ci
+    if bootstrap_ci and (len(a) + len(b)) > _MAX_BOOTSTRAP_OBS:
+        bootstrap_ci = False
+        notes.append(
+            "Bootstrap CIs skipped for runtime control because group sizes exceed "
+            f"{_MAX_BOOTSTRAP_OBS:,} combined observations."
+        )
+
+    def _bounded_pair_samples(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        if len(x) * len(y) <= _MAX_CLIFF_PAIRS:
+            return x, y
+        max_each = max(int(np.sqrt(_MAX_CLIFF_PAIRS)), 2)
+        x_n = min(len(x), max_each)
+        y_n = min(len(y), max_each)
+        notes.append(
+            "Cliff's delta used deterministic subsamples for runtime control "
+            f"({x_n} from group A, {y_n} from group B)."
+        )
+        return (
+            rng.choice(x, size=x_n, replace=False),
+            rng.choice(y, size=y_n, replace=False),
+        )
 
     def _bootstrap_ci(
         a: np.ndarray, b: np.ndarray, stat_fn, n_boot: int = 1000
@@ -158,7 +185,7 @@ def effect_size(params: EffectSizeParams, ctx: AgentContext) -> dict:
                 "Positive = group A higher than group B."
             ),
         }
-        if params.bootstrap_ci:
+        if bootstrap_ci:
             def _d_fn(x: np.ndarray, y: np.ndarray) -> float:
                 ps = np.sqrt(((len(x)-1)*x.std(ddof=1)**2 + (len(y)-1)*y.std(ddof=1)**2) / (len(x)+len(y)-2))
                 return float((x.mean() - y.mean()) / ps) if ps > 0 else 0.0
@@ -171,7 +198,8 @@ def effect_size(params: EffectSizeParams, ctx: AgentContext) -> dict:
             dom = sum(1 if xi > yi else -1 if xi < yi else 0 for xi in x for yi in y)
             return float(dom) / (len(x) * len(y))
 
-        delta = _cliff_fn(a, b)
+        a_cliff, b_cliff = _bounded_pair_samples(a, b)
+        delta = _cliff_fn(a_cliff, b_cliff)
         delta_entry: dict = {
             "value": round(delta, 4),
             "magnitude": _magnitude(delta, _CLIFF_THRESHOLDS),
@@ -180,7 +208,7 @@ def effect_size(params: EffectSizeParams, ctx: AgentContext) -> dict:
                 "Positive = group A tends to be higher than group B."
             ),
         }
-        if params.bootstrap_ci:
+        if bootstrap_ci:
             lo, hi = _bootstrap_ci(a, b, _cliff_fn)
             delta_entry["ci_95"] = [lo, hi]
         result["cliff_delta"] = delta_entry
@@ -208,5 +236,8 @@ def effect_size(params: EffectSizeParams, ctx: AgentContext) -> dict:
             result["risk_measures"] = {
                 "error": "compute_risk_measures=True but column is not binary (0/1). Skipped."
             }
+
+    if notes:
+        result["runtime_notes"] = list(dict.fromkeys(notes))
 
     return result

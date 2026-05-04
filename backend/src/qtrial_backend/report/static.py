@@ -20,6 +20,8 @@ from qtrial_backend.agentic.finding_categories import is_user_facing_nonfinding_
 
 console = Console()
 
+_CLINICAL_ANALYSIS_MAX_ROWS = 10000
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +50,44 @@ def _md_table(headers: list[str], rows: list[list[Any]]) -> str:
         cells = " | ".join(_fmt(c) for c in row)
         lines.append(f"| {cells} |")
     return "\n".join(lines)
+
+
+def _sample_for_clinical_analysis(
+    df: pd.DataFrame,
+    *,
+    treatment_col: str | None,
+    event_col: str | None,
+    max_rows: int = _CLINICAL_ANALYSIS_MAX_ROWS,
+) -> tuple[pd.DataFrame, dict[str, Any] | None]:
+    if len(df) <= max_rows:
+        return df, None
+
+    strata_cols = [col for col in (treatment_col, event_col) if col and col in df.columns]
+    if strata_cols:
+        strat_key = df[strata_cols].astype(str).agg("|".join, axis=1)
+        sampled = (
+            df.assign(_qtrial_stratum=strat_key)
+            .groupby("_qtrial_stratum", group_keys=False, observed=True)
+            .apply(lambda group: group.sample(
+                n=max(1, int(round(len(group) / len(df) * max_rows))),
+                random_state=42,
+            ))
+            .drop(columns="_qtrial_stratum")
+        )
+        if len(sampled) > max_rows:
+            sampled = sampled.sample(n=max_rows, random_state=42)
+    else:
+        sampled = df.sample(n=max_rows, random_state=42)
+
+    sampled = sampled.sort_index()
+    return sampled, {
+        "full_rows": int(len(df)),
+        "analysis_rows": int(len(sampled)),
+        "max_rows": int(max_rows),
+        "sampling_method": "stratified_random" if strata_cols else "random",
+        "strata_columns": strata_cols,
+        "random_state": 42,
+    }
 
 
 # ── Auto-detection ─────────────────────────────────────────────────────────────
@@ -760,6 +800,18 @@ results are marked `gated_out = True` (closed testing procedure, ICH E9 §2.2.5)
 def _section_clinical_analysis(result: dict) -> str:
     """Render the three-stage clinical analysis result as Markdown."""
     lines = ["## Clinical Trial Statistical Framework (Three-Stage)", ""]
+    sampling = result.get("sampling")
+    if isinstance(sampling, dict) and sampling.get("analysis_rows") != sampling.get("full_rows"):
+        lines.append(
+            f"> Large-dataset mode: this section used a reproducible "
+            f"{sampling.get('sampling_method', 'random')} sample of "
+            f"{int(sampling.get('analysis_rows', 0)):,} from "
+            f"{int(sampling.get('full_rows', 0)):,} rows for runtime control."
+        )
+        strata_cols = sampling.get("strata_columns") or []
+        if strata_cols:
+            lines.append(f"> Stratified by: {', '.join(f'`{col}`' for col in strata_cols)}.")
+        lines.append("")
 
     # Stage 1
     s1 = result.get("stage_1_integrity", {})
@@ -1088,16 +1140,33 @@ def build_static_report(
     try:
         from qtrial_backend.tools.stats.clinical_stats import run_clinical_analysis
 
-        clinical_config = _build_clinical_config(df, treatment_col, time_col, event_col)
+        clinical_df, clinical_sampling = _sample_for_clinical_analysis(
+            df,
+            treatment_col=treatment_col,
+            event_col=event_col,
+        )
+        clinical_config = _build_clinical_config(clinical_df, treatment_col, time_col, event_col)
         console.print(f"  [yellow]▸[/yellow] Clinical Trial Analysis (three-stage)…")
+        if clinical_sampling:
+            console.print(
+                "    [dim]Large-dataset mode: "
+                f"sampled {clinical_sampling['analysis_rows']:,} of {clinical_sampling['full_rows']:,} rows[/dim]"
+            )
         if emit is not None:
             try:
-                emit({"type": "progress", "stage": "StaticAnalysis",
-                      "message": "Running Clinical Trial Analysis…"})
+                msg = "Running Clinical Trial Analysis…"
+                if clinical_sampling:
+                    msg += (
+                        f" large-dataset sample "
+                        f"({clinical_sampling['analysis_rows']:,}/{clinical_sampling['full_rows']:,} rows)"
+                    )
+                emit({"type": "progress", "stage": "StaticAnalysis", "message": msg})
             except Exception:
                 pass
 
-        clinical_analysis_result = run_clinical_analysis(df, clinical_config)
+        clinical_analysis_result = run_clinical_analysis(clinical_df, clinical_config)
+        if clinical_sampling:
+            clinical_analysis_result["sampling"] = clinical_sampling
 
         console.print(f"    [green]✓[/green] Clinical Trial Analysis")
         if emit is not None:

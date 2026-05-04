@@ -157,14 +157,6 @@ def _ensure_endpoint_selected(
     return df[selected_columns] if selected_columns else df
 
 
-_CLINICAL_PROTECTED_HINTS = re.compile(
-    r"\b(age|sex|gender|sodium|na\b|creatinine|egfr|ejection|ef\b|blood\s+pressure|sbp|dbp|"
-    r"diabet|anaemi|hypertens|smok|mortality|death|surviv|treat|dose|baseline|severity|"
-    r"biomarker|lab|platelet|hemoglobin|cpk|creatinine\s+phosphokinase)\b",
-    re.IGNORECASE,
-)
-
-
 def _compute_protected_columns(
     df: pd.DataFrame,
     *,
@@ -173,7 +165,15 @@ def _compute_protected_columns(
     column_dict: dict[str, str] | None,
     meta: MetadataInput | None,
 ) -> list[str]:
-    """Return clinically important variables that feature selection should preserve."""
+    """Return columns that feature selection must always preserve.
+
+    Only the outcome endpoint and variables the user explicitly designated as
+    important are protected.  Clinical-hint auto-detection and analyst-report
+    text matching have been removed because they protect so many columns in
+    typical clinical datasets that all selection methods converge to an
+    identical feature set, eliminating any differentiation between LASSO,
+    mRMR, and QUBO.
+    """
     protected: set[str] = set()
     if endpoint_column and endpoint_column in df.columns:
         protected.add(endpoint_column)
@@ -188,29 +188,10 @@ def _compute_protected_columns(
                         protected.add(col)
                         break
 
-    # Protect clinically important variables by name or data dictionary semantics.
-    for col in df.columns:
-        if _CLINICAL_PROTECTED_HINTS.search(col):
-            protected.add(col)
-            continue
-        if column_dict:
-            desc = column_dict.get(col) or ""
-            if desc and _CLINICAL_PROTECTED_HINTS.search(desc):
-                protected.add(col)
-
-    # If a human analyst report is provided, protect mentioned variables so they remain analyzable/comparable.
-    if analyst_report_text:
-        lowered = analyst_report_text.lower()
-        for col in df.columns:
-            token = col.lower()
-            if len(token) >= 4 and token in lowered:
-                protected.add(col)
-                continue
-            normalized = _normalize_column_name(col)
-            if len(normalized) >= 4 and normalized in _normalize_column_name(lowered):
-                protected.add(col)
-
     return sorted(protected)
+
+
+_MAX_ROWS = 3_000
 
 
 async def _read_dataset_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
@@ -223,6 +204,8 @@ async def _read_dataset_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
             df = pd.read_csv(io.BytesIO(content))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not parse file: {exc}")
+    if len(df) > _MAX_ROWS:
+        df = df.head(_MAX_ROWS)
     return df, fname
 
 
@@ -402,6 +385,7 @@ async def run_analysis(
             methodology_chapter,
             analyst_report_text,
             analyst_report_name,
+            original_df=df,
         )
     except Exception as exc:
         raise HTTPException(
@@ -429,7 +413,7 @@ async def run_analysis_stream(
     ),
     confirmed_treatment_columns: list[str] = Form(default=[]),
     dict_file: UploadFile | None = File(None, description="Optional JSON column dictionary"),
-    feature_selection_method: str = Form("mrmr", description="Feature selection method: univariate, mrmr, lasso, elastic_net, qubo"),
+    feature_selection_method: str = Form("mrmr", description="Feature selection method: none, univariate, mrmr, lasso, elastic_net, qubo"),
 ) -> StreamingResponse:
     """
     Same as /api/run but streams Server-Sent Events so the frontend can show
@@ -504,30 +488,67 @@ async def run_analysis_stream(
 
                 method = feature_selection_method.lower()
 
-                if method == "qubo":
+                if method == "none":
+                    all_columns = list(df.columns)
+                    quantum_evidence = {
+                        "n_candidates": max(len(df.columns) - (1 if endpoint_column else 0), 0),
+                        "n_selected": len(all_columns),
+                        "selected_columns": all_columns,
+                        "excluded_columns": [],
+                        "protected_columns": protected_columns,
+                        "protected_added_columns": [],
+                        "redundancy_before": 0.0,
+                        "redundancy_after": 0.0,
+                        "redundancy_reduction_pct": 0.0,
+                        "method": "none",
+                        "selection_method": "none",
+                    }
+                    selected_df = df
+                elif method == "qubo":
                     profile = build_dataset_evidence(df)
                     quantum_evidence = run_qubo_feature_selection(df, profile, endpoint_column, 0.5)
                     quantum_evidence["method"] = "qubo"
                     selected_df = _ensure_endpoint_selected(df, quantum_evidence, endpoint_column, protected_columns)
                 else:
+                    # Compute pre-selection redundancy on the full feature set.
+                    from qtrial_backend.feature_selection.utils import (
+                        handle_mixed_types,
+                        mean_pairwise_correlation,
+                    )
+                    candidate_pre = [c for c in df.columns if c != endpoint_column]
+                    try:
+                        prep_pre, _, _, _ = handle_mixed_types(df[candidate_pre])
+                        X_pre = prep_pre.values.astype(float)
+                        redundancy_before = float(mean_pairwise_correlation(X_pre)) if X_pre.shape[1] > 1 else 0.0
+                    except Exception:
+                        redundancy_before = 0.0
+
                     fs_result = select_features(df, outcome_column=endpoint_column, method=method)
                     selected_features = [
                         col for col in fs_result.get("selected_features", []) if col in df.columns
                     ]
-                    selected_columns = list(dict.fromkeys(selected_features + protected_columns))
+                    # Only force-include the endpoint and user-specified must-haves.
+                    # Do NOT add all protected_columns here — that would make every method
+                    # select an identical feature set, producing identical pipeline results.
+                    must_include = [c for c in protected_columns if c not in selected_features and c in df.columns]
+                    selected_columns = list(dict.fromkeys(selected_features + must_include))
                     excluded_columns = [col for col in df.columns if col not in selected_columns]
+
+                    redundancy_after = float(fs_result.get("redundancy_measure", 0.0))
+                    redundancy_reduction_pct = (
+                        (redundancy_before - redundancy_after) / redundancy_before * 100
+                        if redundancy_before > 0 else 0.0
+                    )
                     quantum_evidence = {
                         "n_candidates": max(len(df.columns) - (1 if endpoint_column else 0), 0),
                         "n_selected": len(selected_columns),
                         "selected_columns": selected_columns,
                         "excluded_columns": excluded_columns,
                         "protected_columns": protected_columns,
-                        "protected_added_columns": [
-                            col for col in protected_columns if col not in selected_features
-                        ],
-                        "redundancy_before": fs_result.get("redundancy_measure", 0),
-                        "redundancy_after": fs_result.get("redundancy_measure", 0),
-                        "redundancy_reduction_pct": 0,
+                        "protected_added_columns": must_include,
+                        "redundancy_before": round(redundancy_before, 3),
+                        "redundancy_after": round(redundancy_after, 3),
+                        "redundancy_reduction_pct": round(redundancy_reduction_pct, 1),
                         "method": method,
                         "selection_method": method,
                     }
@@ -544,10 +565,12 @@ async def run_analysis_stream(
                 selected_df = df
 
             # ── 1. Deterministic static report ───────────────────────────────
+            # Always run statistics on the full df — feature selection gates LLM
+            # context (step 4) but must never suppress statistical discovery.
             clinical_analysis_result: dict | None = None
             methodology_chapter: str | None = None
             try:
-                static_report, methodology_chapter, clinical_analysis_result = build_static_report(selected_df, dataset_name, emit=emit, quantum_evidence=quantum_evidence)
+                static_report, methodology_chapter, clinical_analysis_result = build_static_report(df, dataset_name, emit=emit, quantum_evidence=quantum_evidence)
             except Exception:
                 static_report = None
 
@@ -569,7 +592,7 @@ async def run_analysis_stream(
             # ── 2. LLM-driven statistical agent loop ─────────────────────────
             try:
                 loop_report, tool_log = run_statistical_agent_loop(
-                    selected_df, provider, dataset_name, emit=emit,
+                    df, provider, dataset_name, emit=emit,
                     model=model if provider in ("openrouter", "bedrock") else None,
                     column_dict=column_dict,
                     quantum_evidence=quantum_evidence,
@@ -603,6 +626,7 @@ async def run_analysis_stream(
                 methodology_chapter,
                 analyst_report_text,
                 analyst_report_name,
+                original_df=df,
             )
             loop.call_soon_threadsafe(
                 aq.put_nowait,

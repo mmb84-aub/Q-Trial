@@ -340,25 +340,25 @@ def apply_hard_constraints(
         List of selected column names  (intelligently constrained)
     """
     M = len(candidate_columns)
-    
+
     # Adaptive minimum: encourage diversity (sqrt rule ensures at least sqrt(M) features)
     min_features = max(4, int(np.ceil(np.sqrt(M))))
-    
+
     # Adaptive maximum: keep reasonable feature set, but cap at 20 for interpretability
     max_features = min(20, max(8, M - 1))
-    
+
     logger.debug(f"Hard constraints: M={M}, min_features={min_features}, max_features={max_features}")
-    
+
     selected_cols = [candidate_columns[i] for i in selected_indices if i < M]
-    
+
     # Rule 1: Always include outcome column if designated
     if outcome_column and outcome_column not in selected_cols:
         selected_cols.append(outcome_column)
-    
+
     # Rule 2: Never include excluded columns
     if excluded_columns:
         selected_cols = [col for col in selected_cols if col not in excluded_columns]
-    
+
     # Rule 3: Respect minimum floor
     current_count = len(selected_cols)
     if current_count < min_features:
@@ -368,7 +368,7 @@ def apply_hard_constraints(
         sorted_candidates = sorted(non_outcome_candidates, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
         needed = min_features - current_count
         selected_cols.extend(sorted_candidates[:needed])
-    
+
     # Rule 4: Respect maximum cap
     if len(selected_cols) > max_features:
         logger.info(f"Selected columns ({len(selected_cols)}) exceed adaptive maximum ({max_features}). Trimming...")
@@ -380,7 +380,7 @@ def apply_hard_constraints(
         else:
             sorted_selected = sorted(selected_cols, key=lambda c: relevance_scores.get(c, 0.0), reverse=True)
             selected_cols = sorted_selected[:max_features]
-    
+
     logger.info(f"Final selection: {len(selected_cols)} features (within [{min_features}, {max_features}])")
     return selected_cols
 

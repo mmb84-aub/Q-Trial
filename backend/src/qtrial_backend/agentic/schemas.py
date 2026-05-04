@@ -1064,6 +1064,7 @@ class ComparisonMetrics(BaseModel):
     recall_against_human: float = 0.0
     precision_against_human: float = 0.0
     f1_against_human: float = 0.0
+    mcc_against_human: float | None = None
     novel_rate: float = 0.0
     agreement_count: int = 0
     partial_agreement_count: int = 0

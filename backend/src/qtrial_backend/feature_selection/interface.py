@@ -40,7 +40,17 @@ def select_features(
     Raises:
         ValueError: If method is not recognized
     """
-    if method == "mrmr":
+    if method == "none":
+        candidate_cols = [c for c in df.columns if c != outcome_column]
+        return {
+            "selected_features": candidate_cols,
+            "relevance_scores": {},
+            "redundancy_measure": 0.0,
+            "n_features": len(candidate_cols),
+            "method": "none",
+        }
+
+    elif method == "mrmr":
         return mrmr_selection(df, outcome_column, n_features, **kwargs)
     
     elif method == "lasso":
@@ -56,5 +66,5 @@ def select_features(
     
     else:
         raise ValueError(
-            f"Unknown method: {method}. Choose from: 'mrmr', 'lasso', 'elastic_net', 'univariate'"
+            f"Unknown method: {method}. Choose from: 'none', 'mrmr', 'lasso', 'elastic_net', 'univariate'"
         )
