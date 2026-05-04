@@ -482,9 +482,8 @@ async def run_analysis_stream(
                     )
                 )
                 method = feature_selection_method.lower()
-                
-                if method == 'qubo':
-                    # Use QUBO feature selection
+
+                if method == "qubo":
                     profile = build_dataset_evidence(df)
                     quantum_evidence = run_qubo_feature_selection(df, profile, endpoint_column, 0.5)
                     quantum_evidence["method"] = "qubo"
@@ -532,7 +531,6 @@ async def run_analysis_stream(
                         'selection_method': method,
                     }
                     selected_df = df[selected_columns] if selected_columns else df
-                
                 console.print(
                     f"[green]✓ Feature selection:[/green] "
                     f"Method={method}, "

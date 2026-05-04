@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/regression.py
+# hypothesis_version: 6.151.9
+
+[0.05, 'HC3', '_event', 'adj_r_squared', 'aic', 'bic', 'category', 'ci_lower', 'ci_upper', 'coef', 'coefficients', 'coerce', 'concordance_index', 'covariate', 'cox', 'event', 'event_column', 'exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'f_statistic_p', 'hazard_ratio', 'hr_ci_lower', 'hr_ci_upper', 'linear', 'listwise_deletion', 'log_hr', 'log_likelihood', 'log_odds', 'logistic', 'model_type', 'n_before_dropna', 'n_events', 'n_observations', 'note', 'odds_ratio', 'or_ci_lower', 'or_ci_upper', 'outcome', 'p', 'p_value', 'predictors', 'pseudo_r2_mcfadden', 'r_squared', 'regression', 'rows_dropped', 'rows_dropped_missing', 'se(coef)', 'stats', 'std_err', 'term', 'time_column', 'total_rows_dropped', 'z', 'z_stat']

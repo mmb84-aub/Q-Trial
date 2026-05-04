@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/rag/retrieve_evidence.py
+# hypothesis_version: 6.151.9
+
+[0.0, 300, '...', 'applied_filters', 'char_end', 'char_start', 'chunk_id', 'chunk_index', 'chunk_text', 'chunks', 'citation_hint', 'documents', 'index', 'index_size', 'index_version', 'is_indexed', 'match_count', 'matched_terms', 'message', 'metadata', 'metadata_filters', 'min_score', 'n_results', 'paper_id', 'provenance', 'query', 'query_terms', 'rank', 'results', 'retrieval', 'retrieve_evidence', 'score', 'score_norm', 'snippet', 'source', 'source_id', 'source_name', 'source_type', 'source_types', 'title', 'year']

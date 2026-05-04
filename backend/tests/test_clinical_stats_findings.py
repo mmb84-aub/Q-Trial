@@ -84,7 +84,12 @@ def test_clinical_analysis_emits_structured_finding_without_hardcoded_plain_text
         finding = findings[0]
         assert "finding_text_raw" in finding
         assert finding.get("finding_text_plain") is None
-        assert finding.get("finding_category") in {"analytical", "survival_result"}
+        assert finding.get("finding_category") in {
+            "clinical_association",
+            "negative_association",
+            "statistical_note",
+            "artifact_excluded",
+        }
         assert "variable" in finding
         assert "significant_after_correction" in finding
 
@@ -177,7 +182,8 @@ def test_survival_logrank_p_value_is_harvested_into_corrected_findings() -> None
 
     assert survival_finding is not None
     assert survival_finding.get("raw_p_value") == primary_analysis.get("logrank_p_value")
-    assert survival_finding.get("finding_category") == "survival_result"
+    assert survival_finding.get("finding_category") == "statistical_note"
+    assert survival_finding.get("claim_type") == "statistical_note"
 
 
 def test_survival_predictors_are_marked_significant_and_event_is_not_a_predictor() -> None:
@@ -219,6 +225,60 @@ def test_survival_predictors_are_marked_significant_and_event_is_not_a_predictor
     assert finding_map["ejection_fraction"]["significant_after_correction"] is True
     assert finding_map["serum_creatinine"]["significant_after_correction"] is True
     assert finding_map["serum_sodium"]["significant_after_correction"] is True
+
+
+def test_survival_endpoint_like_derived_columns_are_not_promoted_as_predictors() -> None:
+    df = pd.DataFrame(
+        {
+            "time": [5, 8, 12, 18, 25, 33, 40, 48, 56, 64, 72, 80],
+            "DEATH_EVENT": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+            "survival_status": [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0],
+            "mortality_flag": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+            "age": [50, 52, 54, 56, 58, 60, 70, 72, 74, 76, 78, 80],
+        }
+    )
+
+    result = run_clinical_analysis(
+        df,
+        {
+            "time_col": "time",
+            "event_col": "DEATH_EVENT",
+            "outcome_type": "survival",
+            "primary_endpoints": ["survival_status", "mortality_flag", "age"],
+            "alpha": 0.05,
+        },
+    )
+
+    findings = result.get("stage_3_corrections", {}).get("corrected_findings", [])
+    finding_ids = {f.get("finding_id") for f in findings}
+    assert "survival_status" not in finding_ids
+    assert "mortality_flag" not in finding_ids
+    assert "DEATH_EVENT" not in finding_ids
+
+
+def test_followup_time_column_is_not_promoted_as_survival_predictor() -> None:
+    df = pd.DataFrame(
+        {
+            "time": [5, 8, 12, 18, 25, 33, 40, 48, 56, 64, 72, 80],
+            "followup_time": [5, 8, 12, 18, 25, 33, 40, 48, 56, 64, 72, 80],
+            "DEATH_EVENT": [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+            "age": [50, 52, 54, 56, 58, 60, 70, 72, 74, 76, 78, 80],
+        }
+    )
+
+    result = run_clinical_analysis(
+        df,
+        {
+            "time_col": "time",
+            "event_col": "DEATH_EVENT",
+            "outcome_type": "survival",
+            "primary_endpoints": ["followup_time", "age"],
+            "alpha": 0.05,
+        },
+    )
+
+    findings = result.get("stage_3_corrections", {}).get("corrected_findings", [])
+    assert all(f.get("finding_id") != "followup_time" for f in findings)
 
 
 def test_heart_failure_survival_regression_uses_death_event_and_surfaces_known_predictors() -> None:

@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/config.py
+# hypothesis_version: 6.151.9
+
+[',', '.env', '25', '4000', '4096', '8192', 'ANTHROPIC_API_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_BEDROCK_MODEL', 'AWS_PROFILE', 'AWS_REGION', 'CLAUDE_MODEL', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'MAX_AGENT_ITERATIONS', 'NCBI_API_KEY', 'OPENAI_API_KEY', 'OPENAI_MODEL', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'S2_API_KEY', 'claude-opus-4-6', 'gemini-2.5-flash', 'gpt-4o-mini', 'openai/gpt-4o', 'us-east-1']

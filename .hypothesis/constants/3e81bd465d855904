@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/rag/models.py
+# hypothesis_version: 6.151.9
+
+[0.0, 'Chunk text content', 'Query text', 'data_dictionary', 'file', 'literature', 'tool_result', 'user_input']

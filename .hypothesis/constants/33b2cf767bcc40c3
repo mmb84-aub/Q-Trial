@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/rag/ingestion.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.05, 0.15, 0.2, 0.25, 1.0, 250, '"error"', ', ', '.csv', '.json', '.jsonl', '.markdown', '.md', '.rst', '.text', '.txt', 'Unknown title', '[]', 'abstract', 'authors', 'columns', 'confidence', 'correlation', 'data_dictionary', 'effect', 'file', 'file_extension', 'hazard', 'literature', 'literature_search', 'median', 'n_columns', 'none', 'null', 'odds', 'p_value', 'paperId', 'paper_id', 'pmid', 'r', 'result_char_count', 'result_is_json', 'result_quality', 'risk', 'search_query', 'significant', 'title', 'tldr', 'tool_arguments', 'tool_name', 'tool_result', 'user_input', 'utf-8', 'year', '{', '{}', '}']

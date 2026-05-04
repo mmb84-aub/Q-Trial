@@ -11,6 +11,7 @@ Literature references:
 """
 
 import logging
+import time
 from typing import Optional
 
 import numpy as np
@@ -280,10 +281,15 @@ def solve_qubo(
         Q: QUBO matrix dict
         num_reads: Number of independent annealing attempts (default 1000, increased for diversity)
         num_sweeps: Length of each annealing schedule (default 1000, increased for quality)
+        timeout_seconds: Optional best-effort time budget for the solve
     
     Returns:
         Dict mapping variable index to binary value (0 or 1)
     """
+    started_at = time.monotonic()
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        return {}
+
     sampler = neal.SimulatedAnnealingSampler()
     
     # Increased settings for better exploration and optimization
@@ -300,7 +306,10 @@ def solve_qubo(
     lowest_energy = response.first.energy
     
     logger.debug(f"QUBO solver: best energy={lowest_energy:.6f}, n_selected={sum(best_sample.values())}")
-    
+
+    if timeout_seconds is not None and time.monotonic() - started_at > timeout_seconds:
+        logger.warning("QUBO solve exceeded timeout budget; returning best available sample.")
+
     return best_sample
 
 
@@ -419,6 +428,7 @@ def run_qubo_feature_selection(
         profile: Static profile object from profiler
         outcome_column: Name of outcome column (optional)
         lambda_penalty: Penalty weight for redundancy (default 0.8 for stronger redundancy reduction)
+        timeout_seconds: Optional best-effort time budget for solver attempts
     
     Returns:
         Dict with keys:
@@ -478,8 +488,24 @@ def run_qubo_feature_selection(
     best_result = None
     best_reduction = -float('inf')
     
+    started_at = time.monotonic()
+    timed_out = False
+
     for attempt in range(3):
-        best_sample = solve_qubo(Q, num_reads=2000, num_sweeps=2000, timeout_seconds=timeout_seconds)
+        if timeout_seconds is not None and time.monotonic() - started_at >= timeout_seconds:
+            timed_out = True
+            break
+
+        remaining_timeout = None
+        if timeout_seconds is not None:
+            remaining_timeout = max(timeout_seconds - (time.monotonic() - started_at), 0)
+
+        best_sample = solve_qubo(
+            Q,
+            num_reads=2000,
+            num_sweeps=2000,
+            timeout_seconds=remaining_timeout,
+        )
         selected_indices = [i for i, val in best_sample.items() if val == 1]
         
         # Apply hard constraints to get candidate selection
@@ -506,11 +532,23 @@ def run_qubo_feature_selection(
             }
         
         logger.debug(f"QUBO attempt {attempt + 1}/3: reduction={temp_reduction:.4f}")
-    
-    # Use the best result found
-    selected_columns = best_result['selected_columns']
-    redundancy_after = best_result['redundancy_after']
-    qubo_reduction = best_result['reduction']
+
+    if best_result is None:
+        logger.warning("QUBO solver timed out before producing a result. Using greedy diversity selection.")
+        selected_columns = greedy_diversity_selection(
+            df, candidate_columns, relevance_scores, outcome_column, min(7, len(candidate_columns))
+        )
+        redundancy_after = mean_pairwise_correlation(
+            df,
+            [c for c in selected_columns if pd.api.types.is_numeric_dtype(df[c].dtype)],
+        )
+        qubo_reduction = (redundancy_before - redundancy_after) / redundancy_before if redundancy_before > 0 else 0.0
+        selection_method = "error_fallback" if timed_out else "greedy_diversity"
+    else:
+        # Use the best result found
+        selected_columns = best_result['selected_columns']
+        redundancy_after = best_result['redundancy_after']
+        qubo_reduction = best_result['reduction']
     
     # Fallback to greedy diversity selection if QUBO achieves <15% reduction
     # OR if selection is empty

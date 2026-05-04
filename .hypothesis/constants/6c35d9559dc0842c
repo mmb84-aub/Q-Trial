@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/dataset/load.py
+# hypothesis_version: 6.151.9
+
+[0.2, 0.5, '.csv', '.xls', '.xlsx', 'excluded', 'listwise_deletion']

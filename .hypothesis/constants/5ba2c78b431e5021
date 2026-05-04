@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/sample.py
+# hypothesis_version: 6.151.9
+
+['Column to filter on', 'n_returned', 'records', 'rows', 'sample_rows', 'stats', 'total_matching']

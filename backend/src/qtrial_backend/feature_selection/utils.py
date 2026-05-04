@@ -60,7 +60,7 @@ def handle_mixed_types(df, numeric_cols=None, categorical_cols=None):
     for col in numeric_cols:
         if prepared_df[col].isna().any():
             median_val = prepared_df[col].median()
-            prepared_df[col].fillna(median_val, inplace=True)
+            prepared_df[col] = prepared_df[col].fillna(median_val)
     
     return prepared_df, encoders, numeric_cols, categorical_cols
 

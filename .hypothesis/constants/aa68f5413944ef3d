@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/api.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.5, 25.0, 1800.0, 404, 413, 422, 500, 1024, '\n\n---\n\n', '*', '.', '.json', '.xlsx', '/api/health', '/api/report/adl', '/api/report/pdf', '/api/run', '/api/run/stream', '0.1.0', ': keepalive\n\n', 'CSV or XLSX dataset', 'Cache-Control', 'Content-Disposition', 'StaticAnalysis', 'X-Accel-Buffering', '[^a-z0-9]+', 'analyst_report.txt', 'application/pdf', 'bedrock', 'candidate_columns', 'complete', 'data', 'dataset', 'death', 'deathevent', 'error', 'event', 'excluded', 'excluded_columns', 'gemini', 'json', 'message', 'mortality', 'n_selected', 'no', 'no-cache', 'ok', 'openrouter', 'outcome', 'outputs', 'qtrial-backend', 'response', 'selected_columns', 'service', 'stage', 'stage_complete', 'static_report', 'status', 'surviv', 'survived', 'text/event-stream', 'text/markdown', 'type', 'utf-8', 'warning']

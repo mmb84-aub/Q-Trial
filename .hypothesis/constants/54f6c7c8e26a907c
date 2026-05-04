@@ -1,0 +1,4 @@
+# file: /Users/bailoun/Projects/uni/Q-Trial/backend/src/qtrial_backend/tools/stats/effect_size.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.147, 0.2, 0.33, 0.474, 0.5, 0.8, 1.0, 2.5, 97.5, 1000, 'Label for group A', 'Label for group B', 'both', 'ci_95', 'cliff_delta', 'cohen_d', 'effect_size', 'error', 'group_a', 'group_b', 'group_column', 'inf', 'interpretation', 'label', 'large', 'listwise_deletion', 'magnitude', 'mean', 'medium', 'n', 'n_before_dropna', 'negligible', 'nnt', 'note', 'numeric_column', 'odds_ratio', 'p_a', 'p_b', 'risk_difference', 'risk_measures', 'risk_ratio', 'rows_dropped', 'small', 'stats', 'std', 'total_rows_dropped', 'value']
