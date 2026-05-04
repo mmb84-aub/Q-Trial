@@ -47,14 +47,6 @@ const FEATURE_SELECTION_METHODS = [
     pros: ["Handles multicollinearity well", "Good balance", "Fast"],
     cons: ["Similar to LASSO"],
   },
-  {
-    id: "qubo",
-    label: "QUBO",
-    description: "Quantum-inspired optimization that balances relevance and redundancy.",
-    speed: "variable",
-    pros: ["Strong redundancy control", "Global optimization objective", "Good for correlated features"],
-    cons: ["Slower than classical methods"],
-  },
 ];
 
 const METHOD_LABELS: Record<string, string> = {

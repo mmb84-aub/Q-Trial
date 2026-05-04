@@ -167,6 +167,7 @@ def _compute_protected_columns(
 ) -> list[str]:
     """Return columns that feature selection must always preserve.
 
+    Only the outcome endpoint and variables the user explicitly designated as
     important are protected. Clinical-hint auto-detection and analyst-report
     text matching have been removed because they protect so many columns in
     typical clinical datasets that all selection methods converge to an
