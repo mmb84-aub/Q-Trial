@@ -167,8 +167,7 @@ def _compute_protected_columns(
 ) -> list[str]:
     """Return columns that feature selection must always preserve.
 
-    Only the outcome endpoint and variables the user explicitly designated as
-    important are protected.  Clinical-hint auto-detection and analyst-report
+    important are protected. Clinical-hint auto-detection and analyst-report
     text matching have been removed because they protect so many columns in
     typical clinical datasets that all selection methods converge to an
     identical feature set, eliminating any differentiation between LASSO,
@@ -177,6 +176,7 @@ def _compute_protected_columns(
     protected: set[str] = set()
     if endpoint_column and endpoint_column in df.columns:
         protected.add(endpoint_column)
+
     if meta and meta.important_variables:
         for v in meta.important_variables:
             if v in df.columns:
@@ -485,7 +485,6 @@ async def run_analysis_stream(
                         + [col for col in confirmed_treatment_columns if col in df.columns]
                     )
                 )
-
                 method = feature_selection_method.lower()
 
                 if method == "none":
@@ -553,7 +552,6 @@ async def run_analysis_stream(
                         "selection_method": method,
                     }
                     selected_df = df[selected_columns] if selected_columns else df
-
                 console.print(
                     f"[green]✓ Feature selection:[/green] "
                     f"Method={method}, "

@@ -1061,8 +1061,9 @@ class ComparisonMetrics(BaseModel):
     matched_pairs: int = 0
     qtrial_only_count: int = 0
     human_only_count: int = 0
-    recall_against_human: float = 0.0
+    precision_against_qtrial: float = 0.0
     precision_against_human: float = 0.0
+    recall_against_human: float = 0.0
     f1_against_human: float = 0.0
     mcc_against_human: float | None = None
     novel_rate: float = 0.0

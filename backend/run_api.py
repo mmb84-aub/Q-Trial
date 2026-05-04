@@ -6,6 +6,13 @@ import os
 import sys
 from pathlib import Path
 
+# Windows redirected stdout/stderr can default to a legacy "charmap"
+# encoding, which crashes when Rich/log output contains symbols like
+# warning signs. Force UTF-8 so console output cannot fail the request.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 # Add src to path so qtrial_backend is importable
 backend_dir = Path(__file__).parent
 src_dir = backend_dir / "src"

@@ -206,8 +206,9 @@ export interface ComparisonMetrics {
   matched_pairs: number;
   qtrial_only_count: number;
   human_only_count: number;
-  recall_against_human: number;
+  precision_against_qtrial: number;
   precision_against_human: number;
+  recall_against_human: number;
   f1_against_human: number;
   mcc_against_human: number | null;
   novel_rate: number;

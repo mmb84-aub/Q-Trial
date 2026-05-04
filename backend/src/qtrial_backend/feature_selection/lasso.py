@@ -6,7 +6,7 @@ import pandas as pd
 from sklearn.linear_model import LassoCV, ElasticNetCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_predict
-from .utils import handle_mixed_types, mean_pairwise_correlation
+from .utils import default_feature_count, handle_mixed_types, mean_pairwise_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ def lasso_selection(
     X_scaled = scaler.fit_transform(X)
     
     n_candidates = X.shape[1]
+    target_features = min(n_features if n_features is not None else default_feature_count(n_candidates), n_candidates)
     logger.info(f"LASSO: starting with {n_candidates} candidates")
     
     # Fit LASSO or Elastic Net with cross-validation
@@ -86,11 +87,12 @@ def lasso_selection(
         selected_mask = coef_abs > 1e-6  # Threshold for "effectively non-zero"
         selected_indices = np.where(selected_mask)[0]
         
-        if len(selected_indices) == 0:
-            # If no features selected, take top-k by absolute coefficient
-            if n_features is None:
-                n_features = max(4, int(np.ceil(np.sqrt(n_candidates))))
-            selected_indices = np.argsort(coef_abs)[-n_features:]
+        if len(selected_indices) < target_features:
+            # Keep enough coverage for clinical report comparison even when the
+            # cross-validated L1 penalty shrinks most coefficients to zero.
+            selected_indices = np.argsort(coef_abs)[-target_features:]
+        elif len(selected_indices) > target_features:
+            selected_indices = selected_indices[np.argsort(coef_abs[selected_indices])[-target_features:]]
         
         # Build relevance scores from absolute coefficients
         relevance_scores = {}

@@ -24,6 +24,14 @@ const FEATURE_SELECTION_METHODS = [
     cons: ["Medium speed"],
   },
   {
+    id: "qubo",
+    label: "QUBO",
+    description: "Quantum-inspired feature selection using redundancy-aware optimization.",
+    speed: "9.6s",
+    pros: ["Redundancy-aware optimization", "Strong clinical-column preservation", "Greedy fallback when needed"],
+    cons: ["Slower than baseline methods"],
+  },
+  {
     id: "lasso",
     label: "LASSO Regression",
     description: "Regularized regression with feature coefficients for interpretation.",
@@ -98,7 +106,7 @@ export function FeatureSelectionMethodPicker({ selectedMethod, onChange }: Props
               }}
             >
               {method.label}
-              {selectedMethod === method.id && <span style={{ marginLeft: "0.4rem" }}>(selected)</span>}
+              {selectedMethod === method.id && <span style={{ marginLeft: "0.4rem" }}>✓</span>}
             </button>
           ))}
         </div>
@@ -126,7 +134,7 @@ export function FeatureSelectionMethodPicker({ selectedMethod, onChange }: Props
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", fontSize: "0.85rem" }}>
             <div>
-              <p style={{ fontWeight: 600, color: "#059669", marginBottom: "0.3rem" }}>Strengths:</p>
+              <p style={{ fontWeight: 600, color: "#059669", marginBottom: "0.3rem" }}>✓ Strengths:</p>
               <ul style={{ margin: 0, paddingLeft: "1.2rem", color: "#374151" }}>
                 {selected.pros.map((pro, i) => (
                   <li key={i} style={{ marginBottom: "0.2rem" }}>{pro}</li>
@@ -134,7 +142,7 @@ export function FeatureSelectionMethodPicker({ selectedMethod, onChange }: Props
               </ul>
             </div>
             <div>
-              <p style={{ fontWeight: 600, color: "#dc2626", marginBottom: "0.3rem" }}>Tradeoffs:</p>
+              <p style={{ fontWeight: 600, color: "#dc2626", marginBottom: "0.3rem" }}>⚠ Tradeoffs:</p>
               <ul style={{ margin: 0, paddingLeft: "1.2rem", color: "#374151" }}>
                 {selected.cons.map((con, i) => (
                   <li key={i} style={{ marginBottom: "0.2rem" }}>{con}</li>

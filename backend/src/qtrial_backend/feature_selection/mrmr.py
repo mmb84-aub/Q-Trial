@@ -3,7 +3,7 @@
 import logging
 import numpy as np
 import pandas as pd
-from .utils import handle_mixed_types, compute_mutual_information, mean_pairwise_correlation
+from .utils import default_feature_count, handle_mixed_types, compute_mutual_information, mean_pairwise_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def mrmr_selection(
     
     n_candidates = X.shape[1]
     if n_features is None:
-        n_features = max(4, int(np.ceil(np.sqrt(n_candidates))))
+        n_features = default_feature_count(n_candidates)
     n_features = min(n_features, n_candidates)
     
     logger.info(f"mRMR: starting with {n_candidates} candidates, targeting {n_features} features")

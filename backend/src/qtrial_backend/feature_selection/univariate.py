@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from sklearn.feature_selection import f_classif, f_regression
-from .utils import handle_mixed_types, mean_pairwise_correlation
+from .utils import default_feature_count, handle_mixed_types, mean_pairwise_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ def univariate_selection(
     
     n_candidates = X.shape[1]
     if n_features is None:
-        n_features = max(4, int(np.ceil(np.sqrt(n_candidates))))
+        n_features = default_feature_count(n_candidates)
     n_features = min(n_features, n_candidates)
     
     logger.info(f"Univariate: starting with {n_candidates} candidates, targeting {n_features} features")
