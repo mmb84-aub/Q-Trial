@@ -183,7 +183,7 @@ Human analyst reports are limited to 25 MB and must be UTF-8 text. JSON analyst 
 
 ## API
 
-All analysis upload endpoints use `multipart/form-data`, not base64 JSON.
+All analysis upload endpoints use `multipart/form-data`.
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
