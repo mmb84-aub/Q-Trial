@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from math import log, log10
+from math import log, log10, sqrt
 from dataclasses import dataclass
 from typing import Any
 
@@ -190,6 +190,33 @@ Rules:
 
 Return JSON only:
 {"relation":"agree|partial_agree|contradict","rationale":"..."}
+"""
+
+_MATCHER_SYSTEM = """\
+You compare clinical analysis findings from Q-Trial against findings from an uploaded human analyst report.
+
+Your job is semantic one-to-one matching, not exact text matching.
+
+Rules:
+- Match findings when they describe the same clinical claim, even if wording differs.
+- Use variables, endpoints, direction, significance, p-values, effect sizes, and finding text.
+- Do not match unrelated variables or unrelated endpoints.
+- Each qtrial_id and each human_id may appear in at most one match.
+- Set confidence from 0 to 1 for whether the two findings refer to the same claim.
+- relation must be one of: agree, partial_agree, contradict.
+- Prefer partial_agree when the same claim is present but endpoint, significance, or strength differs.
+- Return JSON only, with this exact shape:
+{
+  "matches": [
+    {
+      "qtrial_id": "qtrial id",
+      "human_id": "human id",
+      "confidence": 0.0,
+      "relation": "agree|partial_agree|contradict",
+      "rationale": "short reason"
+    }
+  ]
+}
 """
 
 
@@ -534,6 +561,21 @@ def _match_findings(
     if not qtrial_findings or not human_findings:
         return [], list(qtrial_findings), list(human_findings)
 
+    llm_result = _llm_match_findings(qtrial_findings, human_findings, provider)
+    if llm_result is not None:
+        deterministic_result = _deterministic_match_findings(qtrial_findings, human_findings, provider)
+        if len(llm_result[0]) >= len(deterministic_result[0]):
+            return llm_result
+        return deterministic_result
+    deterministic_result = _deterministic_match_findings(qtrial_findings, human_findings, provider)
+    return deterministic_result
+
+
+def _deterministic_match_findings(
+    qtrial_findings: list[ComparableFinding],
+    human_findings: list[ComparableFinding],
+    provider: ProviderName,
+) -> tuple[list[FindingMatch], list[ComparableFinding], list[ComparableFinding]]:
     candidate_pairs: list[_CandidatePair] = []
     for qi, qfinding in enumerate(qtrial_findings):
         for hi, hfinding in enumerate(human_findings):
@@ -586,6 +628,95 @@ def _match_findings(
     return matches, qtrial_only, human_only
 
 
+def _llm_match_findings(
+    qtrial_findings: list[ComparableFinding],
+    human_findings: list[ComparableFinding],
+    provider: ProviderName,
+) -> tuple[list[FindingMatch], list[ComparableFinding], list[ComparableFinding]] | None:
+    try:
+        client = get_client(provider)
+        req = LLMRequest(
+            system_prompt=_MATCHER_SYSTEM,
+            user_prompt=(
+                "Return the best one-to-one semantic matches between Q-Trial findings and human report findings. "
+                "Use the JSON payload only; do not invent findings."
+            ),
+            payload={
+                "qtrial_findings": [_finding_for_llm(finding) for finding in qtrial_findings],
+                "human_findings": [_finding_for_llm(finding) for finding in human_findings],
+            },
+        )
+        resp = client.generate(req)
+        data = _load_json_object(resp.text)
+    except Exception:
+        return None
+
+    raw_matches = data.get("matches") if isinstance(data, dict) else None
+    if not isinstance(raw_matches, list):
+        return None
+
+    q_by_id = {finding.finding_id: idx for idx, finding in enumerate(qtrial_findings)}
+    h_by_id = {finding.finding_id: idx for idx, finding in enumerate(human_findings)}
+    used_q: set[int] = set()
+    used_h: set[int] = set()
+    matches: list[FindingMatch] = []
+
+    normalized_matches = []
+    for item in raw_matches:
+        if not isinstance(item, dict):
+            continue
+        confidence = _safe_float(item.get("confidence"))
+        if confidence is None or confidence < 0.45:
+            continue
+        qid = str(item.get("qtrial_id") or "").strip()
+        hid = str(item.get("human_id") or "").strip()
+        relation = str(item.get("relation") or "").strip()
+        if qid not in q_by_id or hid not in h_by_id or relation not in {"agree", "partial_agree", "contradict"}:
+            continue
+        normalized_matches.append((confidence, q_by_id[qid], h_by_id[hid], relation, str(item.get("rationale") or "").strip()))
+
+    normalized_matches.sort(key=lambda item: item[0], reverse=True)
+    for confidence, qi, hi, relation, rationale in normalized_matches:
+        if qi in used_q or hi in used_h:
+            continue
+        qfinding = qtrial_findings[qi]
+        hfinding = human_findings[hi]
+        statistical_comparison = _compare_statistical_evidence(qfinding, hfinding)
+        relation, rationale = _apply_statistical_comparison_to_relation(
+            relation,
+            rationale or "Matched by LLM semantic comparison.",
+            statistical_comparison,
+        )
+        matches.append(
+            FindingMatch(
+                qtrial_finding=qfinding,
+                human_finding=hfinding,
+                relation=relation,
+                pairing_confidence=round(min(confidence, 1.0), 4),
+                match_score=round(min(confidence, 1.0), 4),
+                rationale=rationale,
+                qtrial_evidence_stronger=qfinding.evidence_score > hfinding.evidence_score,
+                matched_by=_matched_by_label(qfinding, hfinding),
+                variable_detected=bool(qfinding.variable and hfinding.variable),
+                endpoint_detected=bool(qfinding.endpoint and hfinding.endpoint),
+                text_used_for_matching={
+                    "qtrial": qfinding.finding_text,
+                    "human": hfinding.finding_text,
+                },
+                statistical_comparison=statistical_comparison,
+            )
+        )
+        used_q.add(qi)
+        used_h.add(hi)
+
+    if not matches:
+        return None
+
+    qtrial_only = [finding for idx, finding in enumerate(qtrial_findings) if idx not in used_q]
+    human_only = [finding for idx, finding in enumerate(human_findings) if idx not in used_h]
+    return matches, qtrial_only, human_only
+
+
 def _classify_relation(
     qfinding: ComparableFinding,
     hfinding: ComparableFinding,
@@ -603,8 +734,7 @@ def _classify_relation(
             payload={"temperature": 0},
         )
         resp = client.generate(req)
-        raw = resp.text.strip().removeprefix("```json").removesuffix("```").strip()
-        data = json.loads(raw)
+        data = _load_json_object(resp.text)
         relation = str(data.get("relation", "")).strip()
         if relation in {"agree", "partial_agree", "contradict"}:
             return relation, str(data.get("rationale", "")).strip()
@@ -1074,6 +1204,7 @@ def _build_metrics(
     precision = _ratio(matched_pairs, total_qtrial)
     recall = _ratio(matched_pairs, total_human)
     f1 = round((2 * precision * recall) / (precision + recall), 4) if precision + recall > 0 else 0.0
+    mcc = _significance_mcc(matches)
     return ComparisonMetrics(
         total_qtrial_findings=total_qtrial,
         total_human_findings=total_human,
@@ -1084,6 +1215,7 @@ def _build_metrics(
         precision_against_human=precision,
         recall_against_human=recall,
         f1_against_human=f1,
+        mcc_against_human=mcc,
         novel_rate=_ratio(len(qtrial_only), total_qtrial),
         agreement_count=agreement_count,
         partial_agreement_count=partial_count,
@@ -1101,15 +1233,77 @@ def _build_metrics(
 
 
 def _build_summary(metrics: ComparisonMetrics) -> str:
+    mcc_text = f", MCC {metrics.mcc_against_human:.2f}" if metrics.mcc_against_human is not None else ""
     summary = (
         f"Matched {metrics.matched_pairs} of {metrics.total_human_findings} human findings. "
         f"Precision {metrics.precision_against_human:.0%}, recall {metrics.recall_against_human:.0%}, "
-        f"F1 {metrics.f1_against_human:.0%}. "
+        f"F1 {metrics.f1_against_human:.0%}{mcc_text}. "
         f"Q-Trial surfaced {metrics.qtrial_only_count} additional findings, "
         f"agreed on {metrics.agreement_count}, partially agreed on {metrics.partial_agreement_count}, "
         f"and contradicted {metrics.contradiction_count} matched findings."
     )
     return summary
+
+
+def _significance_mcc(matches: list[FindingMatch]) -> float | None:
+    tp = tn = fp = fn = 0
+    for match in matches:
+        predicted = match.qtrial_finding.significant
+        actual = match.human_finding.significant
+        if predicted is None or actual is None:
+            continue
+        if predicted is True and actual is True:
+            tp += 1
+        elif predicted is False and actual is False:
+            tn += 1
+        elif predicted is True and actual is False:
+            fp += 1
+        elif predicted is False and actual is True:
+            fn += 1
+
+    total = tp + tn + fp + fn
+    if total == 0:
+        return None
+    denominator = sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    if denominator == 0:
+        return None
+    return round(((tp * tn) - (fp * fn)) / denominator, 4)
+
+
+def _finding_for_llm(finding: ComparableFinding) -> dict[str, Any]:
+    return {
+        "id": finding.finding_id,
+        "text": finding.finding_text,
+        "variable": finding.variable,
+        "endpoint": finding.endpoint,
+        "claim_type": finding.claim_type,
+        "finding_category": finding.finding_category,
+        "direction": finding.direction,
+        "significant": finding.significant,
+        "significance": finding.significance,
+        "p_value": finding.p_value,
+        "effect_size": finding.effect_size,
+        "effect_size_label": finding.effect_size_label,
+        "evidence_label": finding.evidence_label,
+    }
+
+
+def _load_json_object(raw: str) -> dict[str, Any]:
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        data = json.loads(cleaned[start:end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("Expected JSON object from LLM comparison response.")
+    return data
 
 
 def _build_relation_prompt(qfinding: ComparableFinding, hfinding: ComparableFinding) -> str:

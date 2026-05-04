@@ -26,6 +26,7 @@ const METRIC_CARDS: Array<{ key: keyof ComparisonReport["metrics"]; label: strin
   { key: "precision_against_human", label: "Precision", format: formatPercent },
   { key: "recall_against_human", label: "Recall", format: formatPercent },
   { key: "f1_against_human", label: "F1", format: formatPercent },
+  { key: "mcc_against_human", label: "MCC", format: formatMcc },
   { key: "agreement_count", label: "Agreements" },
   { key: "contradiction_count", label: "Contradictions" },
   { key: "average_statistical_agreement_score", label: "Avg stat agreement", format: formatPercent },
@@ -331,6 +332,10 @@ function FindingPanel({ title, finding }: { title: string; finding: ComparableFi
 
 function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+function formatMcc(value: number): string {
+  return formatNumber(value);
 }
 
 function displayDirection(direction: string): string {

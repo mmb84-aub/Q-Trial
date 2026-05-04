@@ -199,6 +199,8 @@ Configure via environment variables (see `backend/src/qtrial_backend/config.py`)
 - **React + Vite** — frontend report viewer
 - **Poetry** — backend dependency management
 
+Automated PR: small README update (2026-05-03)
+
 ---
 
 ## Design Rationale

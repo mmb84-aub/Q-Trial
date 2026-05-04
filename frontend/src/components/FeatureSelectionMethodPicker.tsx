@@ -1,10 +1,18 @@
 const FEATURE_SELECTION_METHODS = [
   {
+    id: "none",
+    label: "None (All Features)",
+    description: "Skip feature selection entirely. All columns passed to the pipeline as-is.",
+    speed: "0s",
+    pros: ["Zero overhead", "No features dropped", "Fastest pipeline start"],
+    cons: ["No redundancy reduction", "More data for LLM to process"],
+  },
+  {
     id: "univariate",
     label: "Univariate Statistical",
     description: "Fast baseline using F-statistics. Good for initial screening.",
     speed: "0.02s",
-    pros: ["Fastest", "Simple & transparent", "High significance rate (75%)"],
+    pros: ["Fastest classical method", "Simple & transparent", "High significance rate (75%)"],
     cons: ["Lower redundancy reduction"],
   },
   {
@@ -39,7 +47,24 @@ const FEATURE_SELECTION_METHODS = [
     pros: ["Handles multicollinearity well", "Good balance", "Fast"],
     cons: ["Similar to LASSO"],
   },
+  {
+    id: "qubo",
+    label: "QUBO",
+    description: "Quantum-inspired optimization that balances relevance and redundancy.",
+    speed: "variable",
+    pros: ["Strong redundancy control", "Global optimization objective", "Good for correlated features"],
+    cons: ["Slower than classical methods"],
+  },
 ];
+
+const METHOD_LABELS: Record<string, string> = {
+  none: "None",
+  univariate: "Univariate",
+  mrmr: "mRMR",
+  lasso: "LASSO",
+  elastic_net: "Elastic Net",
+  qubo: "QUBO",
+};
 
 interface Props {
   selectedMethod: string;
@@ -136,7 +161,10 @@ export function FeatureSelectionMethodPicker({ selectedMethod, onChange }: Props
             color: "#92400e",
             lineHeight: 1.5,
           }}>
-            <strong>Recommendation:</strong> Use {selectedMethod === "mrmr" ? "mRMR" : selectedMethod === "univariate" ? "Univariate" : selectedMethod === "lasso" ? "LASSO" : selectedMethod === "qubo" ? "QUBO" : "Elastic Net"} for clinical trial analysis. All methods produce comparable results; choose based on your need for interpretability (LASSO/Elastic Net), minimal feature redundancy (mRMR), or optimization-based selection (QUBO).
+            <strong>Recommendation:</strong>{" "}
+            {selectedMethod === "none"
+              ? "No feature selection — all columns will be passed to the pipeline. Best when you want zero overhead or are diagnosing pipeline performance."
+              : `Use ${METHOD_LABELS[selectedMethod] ?? selected.label} for clinical trial analysis. Choose based on need for interpretability (LASSO/Elastic Net), minimal redundancy (mRMR), or optimization-based selection (QUBO).`}
           </div>
         </div>
       )}

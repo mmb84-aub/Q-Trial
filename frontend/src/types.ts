@@ -210,6 +210,7 @@ export interface ComparisonMetrics {
   precision_against_human: number;
   recall_against_human: number;
   f1_against_human: number;
+  mcc_against_human: number | null;
   novel_rate: number;
   agreement_count: number;
   partial_agreement_count: number;
